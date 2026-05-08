@@ -469,4 +469,111 @@ namespace RLGC {
         }
     };
 
+	class TeremMoffiReward : public Reward {
+    public:
+        int stepsSinceLastGoal = 0;
+
+        /*
+         * Penalizes the agent for going too long without scoring a goal (Moffi ball).
+         * This implements a Time-to-Goal Penalty using log-space, making sure the agent 
+         * actively searches for the fastest path (brachistochrone) to score.
+         * The penalty grows logarithmically to prevent gradient saturation in long episodes.
+         */
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            // 1. Check if our team scored in this step
+            bool scored = state.goalScored && (player.team != RS_TEAM_FROM_Y(state.ball.pos.y));
+
+            if (scored) {
+                // Reset the timer when a goal is scored
+                stepsSinceLastGoal = 0;
+                return 0.0f;
+            } else {
+                stepsSinceLastGoal++;
+            }
+
+            // Convert steps to seconds (assuming 120Hz physics)
+            float secondsSinceGoal = (float)stepsSinceLastGoal / 120.0f;
+
+            // Log-Space Penalty calculation:
+            // We use log1pf (log(1 + x)) to ensure the result is 0.0f at 0 seconds,
+            // and grows smoothly afterwards.
+            float logPenalty = log1pf(secondsSinceGoal);
+
+            // This returns a positive value designed to be used with a NEGATIVE weight in the main vector
+            return logPenalty;
+        }
+
+        virtual void Reset(const GameState& initialState) override {
+            stepsSinceLastGoal = 0;
+        }
+    };
+
+	class GoalDistancePotentialReward : public Reward {
+    public:
+        /**
+         * Calculates the difference in potential (distance from ball to target goal)
+         * between the current step and the previous step.
+         * Reward = Potential(t) - Potential(t-1)
+         */
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            if (!state.prev) return 0.0f;
+
+            // Define target goal based on team
+            bool targetOrangeGoal = player.team == Team::BLUE;
+            Vec targetPos = targetOrangeGoal ? CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
+
+            // Calculate distances for current and previous frame
+            float distCurrent = (state.ball.pos - targetPos).Length();
+            float distPrev = (state.prev->ball.pos - targetPos).Length();
+
+            // We divide by a normalization factor (e.g., max field length ~10200) 
+            // so the step difference is on a well-behaved scale.
+            float potentialCurrent = -distCurrent / CommonValues::FIELD_LENGTH;
+            float potentialPrev = -distPrev / CommonValues::FIELD_LENGTH;
+
+            // Return the potential difference (shaping)
+            return potentialCurrent - potentialPrev;
+        }
+    };
+
+	class VeloAlignmentReward : public Reward {
+    public:
+        /**
+         * Computes the Scalar Projection of the car's velocity onto the direction vector to the ball.
+         * Ensures that driving fast is only rewarded if it is directed towards the target.
+         */
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            Vec playerToBall = state.ball.pos - player.pos;
+            if (playerToBall.Length() < 1e-5f) return 0.0f;
+
+            Vec dirToBall = playerToBall.Normalized();
+            
+            // Scalar projection (Dot product between raw velocity and normalized direction)
+            // Normalized by CAR_MAX_SPEED to keep the reward range strictly within [-1.0, 1.0]
+            float scalarProjection = player.vel.Dot(dirToBall) / CommonValues::CAR_MAX_SPEED;
+
+            return scalarProjection;
+        }
+    };
+
+	class ActionSmoothingPenalty : public Reward {
+    public:
+        /**
+         * Penalizes sudden changes in control inputs between consecutive frames.
+         * This forces the agent to behave with human-like inertia and smoothness.
+         */
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            if (!player.prev) return 0.0f;
+
+            // Calculate squared differences in steer, pitch, and yaw inputs
+            float diffSteer = player.action.steer - player.prev->action.steer;
+            float diffPitch = player.action.pitch - player.prev->action.pitch;
+            float diffYaw = player.action.yaw - player.prev->action.yaw;
+
+            float squaredDiffSum = (diffSteer * diffSteer) + (diffPitch * diffPitch) + (diffYaw * diffYaw);
+
+            // Returns a positive penalty scale to be multiplied by a negative weight in the vector
+            return squaredDiffSum;
+        }
+    };
 }
