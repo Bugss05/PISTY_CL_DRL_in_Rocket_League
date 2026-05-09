@@ -4,7 +4,7 @@
 
 std::atomic<int> g_totalEpisodes{0};
 std::atomic<int> g_totalGoals{0};
-std::atomic<float> g_currentRadius{200.f};
+std::atomic<float> g_currentRadius{1000.f};
 
 using RocketSim::Math::RandFloat;
 
@@ -64,9 +64,8 @@ void RLGC::GoalShotState::ResetArena(Arena* arena) {
 		cs.vel = Vec(0, 0, 0);
 		cs.angVel = Vec(0, 0, 0);
 
-		float dx = ballX - carX;
-		float dy = ballY - carY;
-		float yaw = atan2f(dy, dx);
+		// Dá ao carro uma rotação (yaw) completamente aleatória em vez de estar sempre virado para a bola
+		float yaw = RandFloat(-M_PI, M_PI);
 
 		Angle angle = Angle(yaw, 0.f, 0.f);
 		cs.rotMat = angle.ToRotMat();

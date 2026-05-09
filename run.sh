@@ -3,11 +3,15 @@ cd "build"
 make -j$(nproc)
 cd ..
 
+# compilar tudo ter em modo Release
+#cd /home/bugss/Desktop/Robotica/build
+#cmake .. -DCMAKE_PREFIX_PATH="/home/bugss/Desktop/Robotica/GigaLearnCPP/libtorch" -DCMAKE_BUILD_TYPE=Release
+#make -j$(nproc)
 # --- CONFIGURAÇÕES ---
 LOG_FILE="crash_report.log"
 TEMP_LIMIT=90
 COOL_DOWN=600 # 10 minutos em segundos
-PROJECT_ROOT="/home/bugss/Desktop/GigaLearnCPP-Leak"
+PROJECT_ROOT="/home/bugss/Desktop/Robotica"
 BIN_PATH="$PROJECT_ROOT/build"
 
 # --- VARIÁVEIS DE AMBIENTE (Essenciais para a tua GPU) ---

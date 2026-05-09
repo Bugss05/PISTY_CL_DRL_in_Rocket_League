@@ -63,10 +63,9 @@ libtorch
 /gigalearn_env  
 *.zip
 GigaLearnCPP/libtorch/
-build/build/
-GigaLearnCPP/libtorch/
 collision_meshes/
 *.so
 *.a
 *.lt
 *.zip
+Videos/
