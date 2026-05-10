@@ -822,9 +822,13 @@ void GGL::Learner::Start() {
 				// Learn
 				Timer learnTimer = {};
 				ppo->Learn(experience, report, isFirstIteration);
-				report["PPO Learn Time"] = learnTimer.Elapsed();
 
-				// Set metrics
+                                // Free CUDA cache again after learning to release VRAM back to OS (important for ROCm/CUDA)
+#ifdef RG_CUDA_SUPPORT
+                                if (ppo->device.is_cuda())
+                                        c10::cuda::CUDACachingAllocator::emptyCache();
+#endif
+
 				float consumptionTime = consumptionTimer.Elapsed();
 				report["Collection Time"] = collectionTime;
 				report["Consumption Time"] = consumptionTime;
