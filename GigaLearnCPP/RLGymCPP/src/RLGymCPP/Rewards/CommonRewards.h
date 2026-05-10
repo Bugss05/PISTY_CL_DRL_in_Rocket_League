@@ -90,13 +90,6 @@ namespace RLGC {
 		}
 	};
 
-	class TouchBallReward : public Reward {
-	public:
-		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) {
-			return player.ballTouchedStep;
-		}
-	};
-
 	class SpeedReward : public Reward {
 	public:
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) {
@@ -566,9 +559,9 @@ namespace RLGC {
             if (!player.prev) return 0.0f;
 
             // Calculate squared differences in steer, pitch, and yaw inputs
-            float diffSteer = player.action.steer - player.prev->action.steer;
-            float diffPitch = player.action.pitch - player.prev->action.pitch;
-            float diffYaw = player.action.yaw - player.prev->action.yaw;
+            float diffSteer = player.prevAction.steer - player.prev->prevAction.steer;
+            float diffPitch = player.prevAction.pitch - player.prev->prevAction.pitch;
+            float diffYaw = player.prevAction.yaw - player.prev->prevAction.yaw;
 
             float squaredDiffSum = (diffSteer * diffSteer) + (diffPitch * diffPitch) + (diffYaw * diffYaw);
 
