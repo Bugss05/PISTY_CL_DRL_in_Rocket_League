@@ -204,6 +204,381 @@ namespace RLGC {
 		}
 	};
 
+// by Diogo Amaral
+	class BallBetweenPlayerAndGoalReward : public Reward {
+	public: 
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			// This reward incentives the agent to position itself such that the ball is between itself and the goal, 
+			// which is a typical good position for shooting.
+
+
+			// Get the goal we are attacking
+			bool targetOrangeGoal = player.team == Team::BLUE;
+			Vec targetPos = targetOrangeGoal ? CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
+
+			// Get the angle between the player->ball and player->goal vectors. The smaller the angle, the better
+			Vec playerToBall = state.ball.pos - player.pos;
+			Vec playerToGoal = targetPos - player.pos;
+
+			float angle = acosf(playerToBall.Normalized().Dot(playerToGoal.Normalized()));
+
+			// Reward is 1 when the ball is perfectly between the player and the goal, and approaches 0 as the angle increases, reaching 0 at 180 degrees
+			// Returns: [0, 1]
+			return (1 - angle / M_PI);
+		}
+	};
+
+	class ShotHitsTargetinGoalReward : public Reward {
+	public:
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			// This reward incentives the agent to hit the ball towards the corners of the goal, 
+			// which are harder for the opponent to save. 
+
+			// THIS IS ONLY REWARDED TO THE AGENT IF THE SCORES!!!
+			if (!state.goalScored) {
+            	return 0.0f;
+        	}
+			bool scored = (player.team != RS_TEAM_FROM_Y(state.ball.pos.y));
+			if (!scored) {
+				return 0.0f;
+			}
+
+			// Get goal that we are attacking
+			bool targetOrangeGoal = player.team == Team::BLUE;
+			Vec targetPos = targetOrangeGoal ? CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
+
+			// Get all 4 goal corners (desired ball hit locations)
+			Vec goalCorners[4] = {
+				targetPos + Vec(-CommonValues::GOAL_WIDTH / 2, 0, 0) + Vec(0, 0, CommonValues::GOAL_HEIGHT), // Top left
+				targetPos + Vec(CommonValues::GOAL_WIDTH / 2, 0, 0) + Vec(0, 0, CommonValues::GOAL_HEIGHT), // Top right
+				targetPos + Vec(-CommonValues::GOAL_WIDTH / 2, 0, 0), // Bottom left
+				targetPos + Vec(CommonValues::GOAL_WIDTH / 2, 0, 0) // Bottom right
+			};
+
+			// Get the closest corner to the ball
+			float closestDist = FLT_MAX;
+			for (int i = 0; i < 4; i++) {
+				float dist = (state.ball.pos - goalCorners[i]).Length();
+				if (dist < closestDist) {
+					closestDist = dist;
+				}
+			}
+
+			// Reward is between 0 and 1, approaching 1 as the ball hits the goal closer to the corners, and approaching 0 as it hits closer to the center. 
+			// A hit in the center is still rewarded by the GoalReward, just less than if it hit in the corners
+			return 1 - (closestDist / CommonValues::GOAL_WIDTH);
+		}
+	};
+
+	class SaveGoalReward : public Reward {
+	public:
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			// This reward incetives the agent to save goals and clear danger.
+			// It calculates if the ball was moving towards the agent's own goal, 
+			// and if after the agent touched the ball and it is no longer moving towards the goal, 
+			// then we consider that a "save" and rewards the agent based on the distance to the goal.
+
+			// Get the goal we are defending
+			bool defendingOrangeGoal = player.team == Team::ORANGE;
+			Vec defendingGoalPos = defendingOrangeGoal ? CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
+
+			// Check if the ball was moving towards our goal in the previous step
+			if (!state.prev)
+				return 0;
+
+			Vec ballToGoalPrev = defendingGoalPos - state.prev->ball.pos;
+			bool wasMovingTowardsGoal = ballToGoalPrev.Dot(state.prev->ball.vel) > 0;
+			if (!wasMovingTowardsGoal)
+				return 0;
+			
+			// Check if the agent touched the ball in this step
+			if (!player.ballTouchedStep)
+				return 0;
+
+			// Check if the ball is no longer moving towards the goal after the touch
+			Vec ballToGoalCurrent = defendingGoalPos - state.ball.pos;
+			bool isNoLongerMovingTowardsGoal = ballToGoalCurrent.Dot(state.ball.vel) <= 0;
+			if (!isNoLongerMovingTowardsGoal)
+				return 0;
+
+			// Reward is based on the distance of the ball to our goal, the closer the ball is to the goal, 
+			// the higher the reward, with a max of 1 when the ball is at the goal line. Returns [0, 1].
+			float distToGoal = ballToGoalCurrent.Length();
+			return RS_CLAMP(1 - (distToGoal / CommonValues::FIELD_LENGTH), 0, 1);
+
+		}
+	};
+
+	class TouchBallReward : public Reward {
+	public:
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			// Returns a reward for touching the ball, with a multiplier for aerial touches.
+			if (!player.ballTouchedStep) {
+				return 0.0f;
+			}
+			float reward = 1.0f;
+			const float DOUBLE_JUMP_HEIGHT = 500.0f;
+			if (!player.isOnGround && player.pos.z > DOUBLE_JUMP_HEIGHT) {
+				reward *= 3.0f;
+			}
+			return reward;
+		}
+	};
+
+	class AirAlignmentReward : public Reward {
+	public:
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			if (player.isOnGround || player.vel.Length() < 100.0f) return 0.0f;
+
+			Vec dirToBall = (state.ball.pos - player.pos).Normalized();
+			Vec velDir = player.vel.Normalized();
+			
+			float alignment = velDir.Dot(dirToBall); // 1.0 se estiver perfeito
+			return RS_MAX(0.0f, alignment);
+		}
+	};
+
+	class HeightMatchReward : public Reward {
+	public:
+		/**
+		 * Incentivizes the player to match the ball's height (Z-axis) as they get closer horizontally.
+		 * This helps prevent "whiffing" by flying over or under the ball.
+		 */
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			// Calculate horizontal distance (XY plane only)
+			float dist2D = (Vec(player.pos.x, player.pos.y, 0) - Vec(state.ball.pos.x, state.ball.pos.y, 0)).Length();
+			
+			// Calculate height difference
+			float heightDiff = fabsf(player.pos.z - state.ball.pos.z);
+			
+			// We only care about height matching when the player is relatively close (e.g., within 1500 units)
+			float proximityFactor = RS_CLAMP(1.0f - (dist2D / 1500.0f), 0.0f, 1.0f);
+			
+			// Reward is higher when heightDiff is small and proximity is high
+			// Max height of the arena is ~2000
+			float heightFactor = RS_CLAMP(1.0f - (heightDiff / 1000.0f), 0.0f, 1.0f);
+			
+			return proximityFactor * heightFactor;
+		}
+	};
+
+	class AirDribbleReward : public Reward {
+	public:
+		int consecutiveAirTouches = 0;
+
+		/**
+		 * Rewards multiple consecutive touches in the air without the ball or player hitting the ground.
+		 * Higher rewards are given for longer chains of air touches.
+		 */
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			if (player.isOnGround || state.ball.pos.z < 200.0f) {
+				consecutiveAirTouches = 0;
+				return 0.0f;
+			}
+
+			if (player.ballTouchedStep) {
+				consecutiveAirTouches++;
+				// Exponential reward for maintaining the dribble: 1st touch = 1, 2nd = 2, 3rd = 4...
+				return powf(2.0f, (float)consecutiveAirTouches - 1.0f);
+			}
+
+			return 0.0f;
+		}
+
+		virtual void Reset(const GameState& initialState) override {
+			consecutiveAirTouches = 0;
+		}
+	};
+
+	class WallLaunchReward : public Reward {
+	public:
+		/**
+		 * Rewards jumping off the side walls and touching the ball shortly after.
+		 * This encourages the bot to transition from wall-riding to aerial play.
+		 */
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			if (!state.prev) return 0.0f;
+
+			// Check if player just left the ground/wall
+			bool justLeftSurface = !player.isOnGround && state.prev->players[player.index].isOnGround;
+			
+			// Check if player is near the side walls (X-axis limits are approx +/- 4096)
+			bool nearWall = fabsf(player.pos.x) > (CommonValues::SIDE_WALL_X - 200.0f);
+
+			if (justLeftSurface && nearWall) {
+				return 1.0f; // Reward the launch itself
+			}
+			
+			// Bonus if they touch the ball while in the air after a wall launch
+			if (player.ballTouchedStep && !player.isOnGround && nearWall) {
+				return 2.0f;
+			}
+
+			return 0.0f;
+		}
+	};
+
+	class LandAllFoursReward : public Reward {
+	public:
+		/**
+		 * Rewards the player for landing on the ground with all four wheels (up-vector alignment).
+		 * This prevents the bot from landing on its side or roof, losing speed.
+		 */
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			if (!state.prev) return 0.0f;
+
+			// Detect the exact moment of landing
+			bool justLanded = player.isOnGround && !state.prev->players[player.index].isOnGround;
+
+			if (justLanded) {
+				// Check if the car's UP vector is aligned with the World UP vector (0,0,1)
+				// Using the rotation matrix forward/up/right vectors
+				float alignment = player.rotMat.up.Dot(Vec(0, 0, 1));
+				
+				// Reward is 1.0 if perfectly upright, 0.0 if sideways or upside down
+				return RS_MAX(0.0f, alignment);
+			}
+
+			return 0.0f;
+		}
+	};
+		
+	class CmonDoSomethingReward : public Reward {
+    public:
+        int stepsSinceLastTouch = 0;
+
+        /**
+         * Penalizes the agent quadratically for going too long without touching the ball.
+         * The penalty starts small (giving the bot time to rotate or get boost) 
+         * but escalates aggressively the longer the bot stays inactive.
+         */
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            if (player.ballTouchedStep) {
+                // Reset the counter immediately upon contact
+                stepsSinceLastTouch = 0;
+                return 0.0f;
+            } else {
+                stepsSinceLastTouch++;
+            }
+
+            // Convert steps to seconds (assuming 120Hz physics)
+            float secondsInactive = (float)stepsSinceLastTouch / 120.0f;
+            return secondsInactive * secondsInactive;
+        }
+
+        virtual void Reset(const GameState& initialState) override {
+            stepsSinceLastTouch = 0;
+        }
+    };
+
+	class TeremMoffiReward : public Reward {
+    public:
+        int stepsSinceLastGoal = 0;
+
+        /*
+         * Penalizes the agent for going too long without scoring a goal (Moffi ball).
+         * This implements a Time-to-Goal Penalty using log-space, making sure the agent 
+         * actively searches for the fastest path (brachistochrone) to score.
+         * The penalty grows logarithmically to prevent gradient saturation in long episodes.
+         */
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            // 1. Check if our team scored in this step
+            bool scored = state.goalScored && (player.team != RS_TEAM_FROM_Y(state.ball.pos.y));
+
+            if (scored) {
+                // Reset the timer when a goal is scored
+                stepsSinceLastGoal = 0;
+                return 0.0f;
+            } else {
+                stepsSinceLastGoal++;
+            }
+
+            // Convert steps to seconds (assuming 120Hz physics)
+            float secondsSinceGoal = (float)stepsSinceLastGoal / 120.0f;
+
+            // Log-Space Penalty calculation:
+            // We use log1pf (log(1 + x)) to ensure the result is 0.0f at 0 seconds,
+            // and grows smoothly afterwards.
+            float logPenalty = log1pf(secondsSinceGoal);
+
+            // This returns a positive value designed to be used with a NEGATIVE weight in the main vector
+            return logPenalty;
+        }
+
+        virtual void Reset(const GameState& initialState) override {
+            stepsSinceLastGoal = 0;
+        }
+    };
+
+	class GoalDistancePotentialReward : public Reward {
+    public:
+        /**
+         * Calculates the difference in potential (distance from ball to target goal)
+         * between the current step and the previous step.
+         * Reward = Potential(t) - Potential(t-1)
+         */
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            if (!state.prev) return 0.0f;
+
+            // Define target goal based on team
+            bool targetOrangeGoal = player.team == Team::BLUE;
+            Vec targetPos = targetOrangeGoal ? CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
+
+            // Calculate distances for current and previous frame
+            float distCurrent = (state.ball.pos - targetPos).Length();
+            float distPrev = (state.prev->ball.pos - targetPos).Length();
+
+            // We divide by a normalization factor (e.g., max field length ~10200) 
+            // so the step difference is on a well-behaved scale.
+            float potentialCurrent = -distCurrent / CommonValues::FIELD_LENGTH;
+            float potentialPrev = -distPrev / CommonValues::FIELD_LENGTH;
+
+            // Return the potential difference (shaping)
+            return potentialCurrent - potentialPrev;
+        }
+    };
+
+	class VeloAlignmentReward : public Reward {
+    public:
+        /**
+         * Computes the Scalar Projection of the car's velocity onto the direction vector to the ball.
+         * Ensures that driving fast is only rewarded if it is directed towards the target.
+         */
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            Vec playerToBall = state.ball.pos - player.pos;
+            if (playerToBall.Length() < 1e-5f) return 0.0f;
+
+            Vec dirToBall = playerToBall.Normalized();
+            
+            // Scalar projection (Dot product between raw velocity and normalized direction)
+            // Normalized by CAR_MAX_SPEED to keep the reward range strictly within [-1.0, 1.0]
+            float scalarProjection = player.vel.Dot(dirToBall) / CommonValues::CAR_MAX_SPEED;
+
+            return scalarProjection;
+        }
+    };
+
+	class ActionSmoothingPenalty : public Reward {
+    public:
+        /**
+         * Penalizes sudden changes in control inputs between consecutive frames.
+         * This forces the agent to behave with human-like inertia and smoothness.
+         */
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            if (!player.prev) return 0.0f;
+
+            // Calculate squared differences in steer, pitch, and yaw inputs
+            float diffSteer = player.prevAction.steer - player.prev->prevAction.steer;
+            float diffPitch = player.prevAction.pitch - player.prev->prevAction.pitch;
+            float diffYaw = player.prevAction.yaw - player.prev->prevAction.yaw;
+
+            float squaredDiffSum = (diffSteer * diffSteer) + (diffPitch * diffPitch) + (diffYaw * diffYaw);
+
+            // Returns a positive penalty scale to be multiplied by a negative weight in the vector
+            return squaredDiffSum;
+        }
+    };
+
 
 	// by Diogo Amaral
 	class BallBetweenPlayerAndGoalReward : public Reward {
