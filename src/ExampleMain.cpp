@@ -8,15 +8,23 @@ Just replace this with your original examplemain.cpp file in your GigalearnCPP-L
 #include <RLGymCPP/Rewards/ZeroSumReward.h>
 #include <RLGymCPP/TerminalConditions/NoTouchCondition.h>
 #include <RLGymCPP/TerminalConditions/GoalScoreCondition.h>
+#include <RLGymCPP/TerminalConditions/TimeoutCondition.h>
 #include <RLGymCPP/ObsBuilders/DefaultObsPadded.h>
 #include <RLGymCPP/StateSetters/KickoffState.h>
 #include <RLGymCPP/StateSetters/RandomState.h>
 #include <RLGymCPP/StateSetters/GoalShotState.h>
+#include <RLGymCPP/StateSetters/AttackerMidfieldState.h>
 #include <RLGymCPP/StateSetters/CombinedState.h>
 #include <RLGymCPP/ActionParsers/DefaultAction.h>
 //include all of our directories to compile the Gigalearnbot.exe
+#include "TrackedStates.h"
+
+
+
 using namespace GGL;
+
 using namespace RLGC;
+
 
 
 /* Helper to randomly choose team size (1v1, 2v2, or 3v3)
@@ -31,70 +39,30 @@ int GetRandomTeamSize() {
 EnvCreateResult EnvCreateFunc(int index) {
 	
 	std::vector<WeightedReward> rewards = {
+        // { new TouchBallReward(), 2.0f }, // COMENTADO: O bot estava a usar isto para fugir com a bola!
 
-        /*
-        // These are ok rewards that will produce a scoring bot in ~100m steps
-
-        // Movement
-        { new AirReward(), 0.25f },
-
-        // Player-ball
-        { new FaceBallReward(), 0.25f },
-        { new VelocityPlayerToBallReward(), 4.f },
-        { new StrongTouchReward(20, 100), 60 },
-
-        // Ball-goal
-        { new ZeroSumReward(new VelocityBallToGoalReward(), 1), 2.0f },
-
-        // Boost
-        { new PickupBoostReward(), 10.f },
-        { new SaveBoostReward(), 0.2f },
-
-        // Game events
-        { new ZeroSumReward(new BumpReward(), 0.5f), 20 },
-        { new ZeroSumReward(new DemoReward(), 0.5f), 80 },
-        { new GoalReward(), 150 }
-
-        */
-
-        // Positioning rewarding
-        { new FaceBallReward(), 1.0f },                       // Facing the ball
-        { new BallBetweenPlayerAndGoalReward(), 1.5f },       // Being in between the ball and the goal
-		{ new LandAllFoursReward(), 10.0f },                   // Rewards clean landings to maintain momentum and recovery speed
-
-        // Momemtum rewarding
-        { new VelocityPlayerToBallReward(), 3.0f },           // Moving towards the ball
-        { new SpeedReward(), 0.5f },                          // Moving at all (to prevent camping)
-        { new WavedashReward(), 5.0f },                       // Wavedashing (ground movement technique that is faster than rolling)
-        
-        // Touch rewarding
-        { new StrongTouchReward(30, 120), 50.0f },            // Hulk Mode on the ball
-        { new TouchBallReward(), 10.0f },                     // Reward for touching the ball (Includes x3 multiplier for high aerials under the hood)
-        { new TouchAccelReward(), 30.0f },                    // Reward for accelerating the ball
-
-        // Boost rewarding
-        // Boost stealing is zero-sum. You get it, opponents lose an opportunity.
-        { new ZeroSumReward(new PickupBoostReward(), 0.0f, 1.0f), 10.0f },              // Picking up boost
-        { new SaveBoostReward(), 0.1f },                                                // Saving boost
-
-        // Score & Defensive Rewarding 
-        // We use ZeroSumReward(..., 1.0f, 1.0f) so the whole team benefits/suffers equally.
-        // Positive behavior automatically punishes the enemy team, and vice-versa!
-        { new ZeroSumReward(new VelocityBallToGoalReward(), 1.0f, 1.0f), 20.0f },       // Going towards the goal with the ball
-        { new ZeroSumReward(new GoalReward(), 1.0f, 1.0f), 200.0f },                    // Scoring (BAMM)   
-        { new ZeroSumReward(new ShotHitsTargetinGoalReward(), 1.0f, 1.0f), 50.0f },     // Na coruja (DOUBLE BAMM)
-        { new ZeroSumReward(new SaveGoalReward(), 1.0f, 1.0f), 150.0f },                // Saving a goal (to encourage goal conservation)
-
-        // Aerial & Advanced Mechanics rewarding 
-        { new AirReward(), 0.2f },                            // Leave the ground
-        { new HeightMatchReward(), 2.0f },                    // Incentivizes matching ball height
-        { new WallLaunchReward(), 5.0f },                     // Rewards jumping off the wall to transition into aerial plays
-        { new AirDribbleReward(), 15.0f },                    // High reward for chaining consecutive aerial touches (Exponential scaling)
+    //{ new GoalDistancePotentialReward(), 10.0f },
+	{ new VelocityPlayerToBallReward(), 1.0f },
+	//{ new FaceBallReward(), 0.5f },
+	//{ new AirReward(), 0.10f },
+    //{ new SpeedReward(), 0.2f },
+    { new VelocityBallToGoalReward(false), 2.0f },
+    { new ZeroSumReward(new GoalReward(), 1.0f, 1.0f), 50.0f },    
+    { new ConstantReward(), -0.1f }, // Penalidade constante fixa por tick vivido    //{ new BallBetweenPlayerAndGoalReward(), 0.5f },
+    //{ new VeloAlignmentReward(), 2.0f },
+    //{ new SpeedReward(), 0.5f },
+    //{ new StrongTouchReward(20, 100), 30.0f },
+    //{ new VelocityBallToGoalReward(false), 25.0f },
+    //{ new GoalDistancePotentialReward(), 40.0f },
+    //{ new GoalReward(), 300.0f },
+    //{ new ActionSmoothingPenalty(), -1.0f },
+    //{ new CmonDoSomethingReward(), -0.4f }
     };
 
 	std::vector<TerminalCondition*> terminalConditions = {
 		new NoTouchCondition(10),
-		new GoalScoreCondition()
+		new GoalScoreCondition(),
+		new TimeoutCondition(60.0f) // Termina/reseta se o jogo rolar por 1 minuto (60 segs) sem golo
 	};
 
 
@@ -106,7 +74,10 @@ EnvCreateResult EnvCreateFunc(int index) {
     arena->AddCar(Team::BLUE, CAR_CONFIG_PLANK);
 
     std::vector<std::pair<StateSetter*, float>> weightedSetters = {
-        { new GoalShotState(), 1.0f },
+        { new TrackedGoalShotState(), 0.5f },
+        { new TrackedRandomState(true,false,true), 0.5f },
+        { new KickoffState(), 0.0f },
+        //{ new AttackerMidfieldState(), 0.0f },    
     }; //state setters, kickoff and randomstate weights go tune them yourself
     CombinedState* combinedSetter = new CombinedState(weightedSetters);
 
@@ -132,7 +103,12 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
     bool doExpensiveMetrics = (rand() % 4) == 0;
     for (auto& state : states) {
         if (state.goalScored) {
-            g_totalGoals++; // We track goals for dynamic distance scaling
+            if (IsArenaGoalShot(state.lastArena)) {
+
+                g_totalGoals++;
+
+            }
+
         }
 
         if (doExpensiveMetrics) {
@@ -160,17 +136,16 @@ int main(int argc, char* argv[]) {
     cfg.deviceType = LearnerDeviceType::GPU_CUDA;
     cfg.tickSkip = 8; //tick skip, if you change this you should change gamma
     cfg.actionDelay = cfg.tickSkip - 1;
-    cfg.numGames =758; //adjust to how good your cpu is, mine is a i7-12700k and 192 games is optimal for me. The better your cpu is, the more games you should have.
+    cfg.numGames =350; //adjust to how good your cpu is, mine is a i7-12700k and 192 games is optimal for me. The better your cpu is, the more games you should have.
 
-    cfg.ppo.tsPerItr = 262144;  
-    cfg.ppo.batchSize = 262144; //how much your bot trains at a time
-    cfg.ppo.miniBatchSize = 131072; //minibatch size. if you have small pc, 25k is good, if you have a powerful pc (4070ti or better) 75k might be optimal
+    cfg.ppo.tsPerItr = 196608;  
+    cfg.ppo.batchSize = 196608; //how much your bot trains at a time
+    cfg.ppo.miniBatchSize = 98304; //minibatch size. if you have small pc, 25k is good, if you have a powerful pc (4070ti or better) 75k might be optimal
     cfg.ppo.epochs = 1; //start out with one epoch, and once your bot gets better increase this to two
     cfg.ppo.entropyScale = 0.035f; //this is a good starting point, lower it if your bot is like very good, or you just want to refine what it already knows                              
     cfg.ppo.gaeGamma = 0.99f; //start with .99, then up to .993 once it can hit ball and shoot ball on net, then .995 once it learns dribbles and powershots, .997 once it gets better than necto.
     cfg.ppo.policyLR = 2e-4f;
     cfg.ppo.criticLR = 2e-4f; //learning rates. start out high, then lower to 1.5e-4 when it learns to shoot and touch ball, then 1e-4 once it learns dribbles, then 0.8e-4 once it is around nexto level.
-
     cfg.ppo.sharedHead.layerSizes = { 1024, 1024, 1024}; //your bot has a shared head, both the cpu and critic learn from this, this should be big sizes
     cfg.ppo.policy.layerSizes = { 256, 256, 256 };
     cfg.ppo.critic.layerSizes = { 256, 256, 256 }; //these are pretty good, DO NOT INCREASE IT FURTHER

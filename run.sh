@@ -1,6 +1,6 @@
 #!/bin/bash
 cd "build"
-make -j$(nproc)
+make -j$(nproc) || { echo "Erro ao compilar! A cancelar arranque."; exit 1; }
 cd ..
 
 # compilar tudo ter em modo Release

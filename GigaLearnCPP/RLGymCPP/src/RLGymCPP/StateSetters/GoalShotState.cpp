@@ -13,9 +13,16 @@ void RLGC::GoalShotState::ResetArena(Arena* arena) {
 	int episodes = ++g_totalEpisodes;
 	if (episodes >= 1000) {
 		// We only want one thread to do the reset, so we check carefully
-		if (g_totalEpisodes.exchange(0) >= 1000) {
-			int goals = g_totalGoals.exchange(0);
-			float winRate = (float)goals / episodes;
+                int actualEps = g_totalEpisodes.exchange(0);
+
+                if (actualEps >= 1000) {
+
+                        int goals = g_totalGoals.exchange(0);
+
+                        int validEps = std::max(actualEps, goals);
+
+                        float winRate = (float)goals / validEps;
+
 			
 			float radius = g_currentRadius.load();
 			if (winRate >= 0.98f) {

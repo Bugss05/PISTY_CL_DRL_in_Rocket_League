@@ -579,3 +579,10 @@ namespace RLGC {
         }
     };
 };
+    class ConstantReward : public Reward {
+    public:
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            return 1.0f;
+        }
+    };
+}
