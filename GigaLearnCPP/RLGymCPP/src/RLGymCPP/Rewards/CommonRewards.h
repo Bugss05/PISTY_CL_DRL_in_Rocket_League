@@ -99,6 +99,20 @@ namespace RLGC {
 	};
 	*/
 
+	class BallTouchGroundPenalty : public Reward {
+	public:
+		float penalty;
+		BallTouchGroundPenalty(float penalty = -5.0f) : penalty(penalty) {}
+
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) {
+			// If the ball is touching the ground (z <= 100 roughly corresponds to ball radius touching the floor)
+			if (state.ball.pos.z <= 105.0f && state.ball.vel.z <= 10.0f) {
+				return penalty;
+			}
+			return 0.0f;
+		}
+	};
+
 	class SpeedReward : public Reward {
 	public:
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) {
@@ -578,7 +592,7 @@ namespace RLGC {
             return squaredDiffSum;
         }
     };
-};
+
     class ConstantReward : public Reward {
     public:
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {

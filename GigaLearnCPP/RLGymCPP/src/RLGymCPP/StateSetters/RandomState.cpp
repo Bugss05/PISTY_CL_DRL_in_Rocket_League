@@ -55,7 +55,7 @@ void RLGC::RandomState::ResetArena(Arena* arena) {
 
 		cs.rotMat = angle.ToRotMat();
 
-		cs.boost = RandFloat(0, 100);
+		cs.boost = 100.f; // INFINITE BOOST
 
 		car->SetState(cs);
 	}

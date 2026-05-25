@@ -15,6 +15,7 @@ Just replace this with your original examplemain.cpp file in your GigalearnCPP-L
 #include <RLGymCPP/StateSetters/GoalShotState.h>
 #include <RLGymCPP/StateSetters/AttackerMidfieldState.h>
 #include <RLGymCPP/StateSetters/CombinedState.h>
+#include <RLGymCPP/StateSetters/AirShotState.h>
 #include <RLGymCPP/ActionParsers/DefaultAction.h>
 //include all of our directories to compile the Gigalearnbot.exe
 #include "TrackedStates.h"
@@ -42,13 +43,15 @@ EnvCreateResult EnvCreateFunc(int index) {
         // { new TouchBallReward(), 2.0f }, // COMENTADO: O bot estava a usar isto para fugir com a bola!
 
     //{ new GoalDistancePotentialReward(), 10.0f },
-	{ new VelocityPlayerToBallReward(), 1.0f },
+	{ new VelocityPlayerToBallReward(), 0.5f },
 	//{ new FaceBallReward(), 0.5f },
 	//{ new AirReward(), 0.10f },
     //{ new SpeedReward(), 0.2f },
-    { new VelocityBallToGoalReward(false), 2.0f },
+    { new VelocityBallToGoalReward(false), 0.8f },
     { new ZeroSumReward(new GoalReward(), 1.0f, 1.0f), 50.0f },    
-    { new ConstantReward(), -0.1f }, // Penalidade constante fixa por tick vivido    //{ new BallBetweenPlayerAndGoalReward(), 0.5f },
+    { new ConstantReward(), -0.1f }, // Penalidade constante fixa por tick vivido
+    { new BallTouchGroundPenalty(-20.0f), 1.0f }, // Penalidade brusca ao tocar a bola no chão
+    //{ new BallBetweenPlayerAndGoalReward(), 0.5f },
     //{ new VeloAlignmentReward(), 2.0f },
     //{ new SpeedReward(), 0.5f },
     //{ new StrongTouchReward(20, 100), 30.0f },
@@ -60,7 +63,7 @@ EnvCreateResult EnvCreateFunc(int index) {
     };
 
 	std::vector<TerminalCondition*> terminalConditions = {
-		new NoTouchCondition(10),
+		new NoTouchCondition(4),
 		new GoalScoreCondition(),
 		new TimeoutCondition(60.0f) // Termina/reseta se o jogo rolar por 1 minuto (60 segs) sem golo
 	};
@@ -69,13 +72,19 @@ EnvCreateResult EnvCreateFunc(int index) {
     // Just 1 player training the shot
     int playersPerTeam = 1;
     auto arena = Arena::Create(GameMode::SOCCAR);
+
+    MutatorConfig mutator = MutatorConfig(GameMode::SOCCAR);
+    mutator.boostUsedPerSecond = 0.0f;
+    mutator.carSpawnBoostAmount = 100.0f;
+    arena->SetMutatorConfig(mutator);
     
     // Auto add a car to BLUE only, so only 1 car exists in the arena
     arena->AddCar(Team::BLUE, CAR_CONFIG_PLANK);
 
     std::vector<std::pair<StateSetter*, float>> weightedSetters = {
-        { new TrackedGoalShotState(), 0.5f },
-        { new TrackedRandomState(true,false,true), 0.5f },
+        { new AirShotState(), 1.0f },           // Foco principal em remates aéreos!
+        { new TrackedGoalShotState(), 0.0f },
+        { new TrackedRandomState(true,false,true), 0.0f },
         { new KickoffState(), 0.0f },
         //{ new AttackerMidfieldState(), 0.0f },    
     }; //state setters, kickoff and randomstate weights go tune them yourself

@@ -16,8 +16,9 @@ RLGC::FList RLGC::DefaultObsPadded::BuildObs(const Player& player, const GameSta
 	for (int i = 0; i < player.prevAction.ELEM_AMOUNT; i++)
 		result += player.prevAction[i];
 
-	for (int i = 0; i < CommonValues::BOOST_LOCATIONS_AMOUNT; i++)
-		result += (float)pads[i];
+	// BOOOST REMOVED
+	// for (int i = 0; i < CommonValues::BOOST_LOCATIONS_AMOUNT; i++)
+	// 	result += (float)pads[i];
 
 	FList selfObs = {};
 	AddPlayerToObs(selfObs, player, inv);

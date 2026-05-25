@@ -10,7 +10,8 @@ void RLGC::DefaultObs::AddPlayerToObs(FList& obs, const Player& player, bool inv
 	obs += phys.vel * velCoef;
 	obs += phys.angVel * angVelCoef;
 
-	obs += player.boost / 100;
+	// BOOST REMOVED
+	// obs += player.boost / 100;
 	obs += player.isOnGround;
 	obs += player.HasFlipOrJump();
 	obs += player.isDemoed;
@@ -31,8 +32,9 @@ RLGC::FList RLGC::DefaultObs::BuildObs(const Player& player, const GameState& st
 	for (int i = 0; i < player.prevAction.ELEM_AMOUNT; i++)
 		result += player.prevAction[i];
 
-	for (int i = 0; i < CommonValues::BOOST_LOCATIONS_AMOUNT; i++)
-		result += (float)pads[i];
+	// BOOST REMOVED
+	// for (int i = 0; i < CommonValues::BOOST_LOCATIONS_AMOUNT; i++)
+	// 	result += (float)pads[i];
 
 	AddPlayerToObs(result, player, inv);
 	FList teammates = {}, opponents = {};
