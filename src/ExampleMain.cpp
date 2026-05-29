@@ -1,6 +1,6 @@
 /* IMPORTANT!!!!!!!!!!!!!!!!!!!
 Just replace this with your original examplemain.cpp file in your GigalearnCPP-Leak/src file
-	*/
+*/
 
 #include <GigaLearnCPP/Learner.h>
 
@@ -43,14 +43,38 @@ EnvCreateResult EnvCreateFunc(int index) {
         // { new TouchBallReward(), 2.0f }, // COMENTADO: O bot estava a usar isto para fugir com a bola!
 
     //{ new GoalDistancePotentialReward(), 10.0f },
-	{ new VelocityPlayerToBallReward(), 0.5f },
 	//{ new FaceBallReward(), 0.5f },
 	//{ new AirReward(), 0.10f },
     //{ new SpeedReward(), 0.2f },
-    { new VelocityBallToGoalReward(false), 0.8f },
-    { new ZeroSumReward(new GoalReward(), 1.0f, 1.0f), 50.0f },    
+	
+    // === REWARDS COMUNS ===
+    { new VelocityPlayerToBallReward(), 0.5f },
     { new ConstantReward(), -0.1f }, // Penalidade constante fixa por tick vivido
     { new BallTouchGroundPenalty(-20.0f), 1.0f }, // Penalidade brusca ao tocar a bola no chão
+    
+    // === FASE 1 (Contacto aereo e remate) ===
+    { new VelocityBallToGoalReward(false), 0.8f },
+    { new ZeroSumReward(new GoalReward(), 1.0f, 1.0f), 50.0f },    
+    { new TouchBallReward(), 3.0f },       // 3x built-in aerial multiplier → ground touch = 3, aerial = 9
+    { new AirAlignmentReward(), 0.4f },    // rewards efficient trajectory toward ball, not just being airborne
+
+    // === FASE 2 (Qualidade do aereo) ===
+    // -> Quando FASE 1 tiver 80% ep c toque
+    /*
+    { new VelocityBallToGoalReward(false), 1.5f },              // was 0.8 — shot direction matters more now
+    { new ZeroSumReward(new GoalReward(), 1.0f, 1.0f), 80.0f }, // was 50 — scoring is the priority
+    { new TouchBallReward(), 1.5f },                            // was 3.0 — contact is expected now, not special
+    { new AerialDistanceReward(), 2.0f },    // rewards how high the contact happens (add to CommonRewards.h)
+    */
+
+    // === FASE 3 (Flip Reset) ===
+    // -> Quando FASE 2 tiver 80% ep c golo
+    /*
+    { new FlipResetReward(), 15.0f },
+    { new StrongTouchReward(30, 120), 2.0f },   // rewards clean powerful shots
+    */
+
+    // === REWARDS ANTIGOS ===
     //{ new BallBetweenPlayerAndGoalReward(), 0.5f },
     //{ new VeloAlignmentReward(), 2.0f },
     //{ new SpeedReward(), 0.5f },
@@ -139,10 +163,10 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
 } //them metrics, I dont use metrics tho
 
 int main(int argc, char* argv[]) {
-    RocketSim::Init("/home/bugss/Desktop/Robotica/collision_meshes"); //INCLUDE YOUR COLLISION MESHES
+    RocketSim::Init("C:\\Robotica\\collision_meshes"); //INCLUDE YOUR COLLISION MESHES
 
     LearnerConfig cfg = {};
-    cfg.deviceType = LearnerDeviceType::GPU_CUDA;
+    cfg.deviceType = LearnerDeviceType::AUTO;
     cfg.tickSkip = 8; //tick skip, if you change this you should change gamma
     cfg.actionDelay = cfg.tickSkip - 1;
     cfg.numGames =350; //adjust to how good your cpu is, mine is a i7-12700k and 192 games is optimal for me. The better your cpu is, the more games you should have.
@@ -155,7 +179,7 @@ int main(int argc, char* argv[]) {
     cfg.ppo.gaeGamma = 0.99f; //start with .99, then up to .993 once it can hit ball and shoot ball on net, then .995 once it learns dribbles and powershots, .997 once it gets better than necto.
     cfg.ppo.policyLR = 2e-4f;
     cfg.ppo.criticLR = 2e-4f; //learning rates. start out high, then lower to 1.5e-4 when it learns to shoot and touch ball, then 1e-4 once it learns dribbles, then 0.8e-4 once it is around nexto level.
-    cfg.ppo.sharedHead.layerSizes = { 1024, 1024, 1024}; //your bot has a shared head, both the cpu and critic learn from this, this should be big sizes
+    cfg.ppo.sharedHead.layerSizes = { 512, 512, 512}; //your bot has a shared head, both the cpu and critic learn from this, this should be big sizes
     cfg.ppo.policy.layerSizes = { 256, 256, 256 };
     cfg.ppo.critic.layerSizes = { 256, 256, 256 }; //these are pretty good, DO NOT INCREASE IT FURTHER
 

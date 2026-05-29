@@ -8,15 +8,15 @@ REM --- CONFIGURAÇÕES ---
 set LOG_FILE=crash_report.log
 set TEMP_LIMIT=90
 set COOL_DOWN=600
-set PROJECT_ROOT=C:\Users\diogo\OneDrive\Área de Trabalho\LIACD\3_ANO\IRI\Robotica
+set PROJECT_ROOT=C:\Robotica
 set BIN_PATH=%PROJECT_ROOT%\build
 set BUILD_DIR=%PROJECT_ROOT%\build
 
 REM --- VARIÁVEIS DE AMBIENTE ---
-set HSA_OVERRIDE_GFX_VERSION=12.0.1
-set AMD_SERIALIZE_KERNEL=3
-set PYTHONHOME=C:\Python312
-set PYTHONPATH=%BIN_PATH%\python_scripts
+rem HSA_OVERRIDE_GFX_VERSION=12.0.1
+rem AMD_SERIALIZE_KERNEL=3
+set PYTHONHOME=C:\Python314
+set PYTHONPATH=%BIN_PATH%
 
 REM Build
 echo [%date% %time%] A compilar o projeto... >> %LOG_FILE%
@@ -38,7 +38,7 @@ REM Loop de execução
 echo [%date% %time%] A iniciar GigaLearnBot... >> %LOG_FILE%
 echo A iniciar GigaLearnBot...
 
-cd /d %BIN_PATH%
+cd /d %BIN_PATH%\Release
 GigaLearnBot.exe
 
 set EXIT_CODE=%ERRORLEVEL%

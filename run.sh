@@ -1,12 +1,12 @@
 #!/bin/bash
-cd "build"
-make -j$(nproc) || { echo "Erro ao compilar! A cancelar arranque."; exit 1; }
-cd ..
+cd "$(dirname "$0")"
 
 # compilar tudo ter em modo Release
-#cd /home/bugss/Desktop/Robotica/build
-#cmake .. -DCMAKE_PREFIX_PATH="/home/bugss/Desktop/Robotica/GigaLearnCPP/libtorch" -DCMAKE_BUILD_TYPE=Release
-#make -j$(nproc)
+mkdir -p build
+cd build
+cmake .. -DCMAKE_PREFIX_PATH="/home/bugss/Desktop/Robotica/GigaLearnCPP/libtorch" -DCMAKE_BUILD_TYPE=Release
+make -j$(nproc) || { echo "Erro ao compilar! A cancelar arranque."; exit 1; }
+cd ..
 # --- CONFIGURAÇÕES ---
 LOG_FILE="crash_report.log"
 TEMP_LIMIT=90
