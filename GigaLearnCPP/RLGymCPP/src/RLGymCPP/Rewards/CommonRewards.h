@@ -105,8 +105,13 @@ namespace RLGC {
 		BallTouchGroundPenalty(float penalty = -5.0f) : penalty(penalty) {}
 
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) {
-			// If the ball is touching the ground (z <= 100 roughly corresponds to ball radius touching the floor)
-			if (state.ball.pos.z <= 105.0f && state.ball.vel.z <= 10.0f) {
+			if (!state.prev) return 0.0f;
+
+			bool wasOnGround = state.prev->ball.pos.z <= 105.0f;
+			bool isOnGround = state.ball.pos.z <= 105.0f;
+
+			// Penaliza apenas no momento em que a bola bate no chão
+			if (!wasOnGround && isOnGround) {
 				return penalty;
 			}
 			return 0.0f;
@@ -323,7 +328,7 @@ namespace RLGC {
 		}
 	};
 
-	class TouchBallReward : public Reward {
+	class TouchBallAerialReward : public Reward {
 	public:
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
 			// Returns a reward for touching the ball, with a multiplier for aerial touches.
@@ -333,8 +338,9 @@ namespace RLGC {
 			float reward = 1.0f;
 			const float DOUBLE_JUMP_HEIGHT = 500.0f;
 			if (!player.isOnGround && player.pos.z > DOUBLE_JUMP_HEIGHT) {
-				reward *= 3.0f;
+				reward = 1.0f;
 			}
+			else reward = 0.0f; // We only care about aerial touches for this reward, ground touches are not rewarded 
 			return reward;
 		}
 	};
@@ -592,6 +598,84 @@ namespace RLGC {
             return squaredDiffSum;
         }
     };
+
+	class FlipResetReward : public Reward {
+	public:
+	    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+	        if (!player.ballTouchedStep) return 0.0f;
+	        if (player.isOnGround) return 0.0f;
+	        // rotMat.up points toward car roof. Upside-down → up points toward floor (z < 0)
+	        // invertedness: -1 = perfectly upright, +1 = perfectly inverted
+	        float invertedness = -player.rotMat.up.Dot(Vec(0, 0, 1));
+	        if (invertedness < 0.5f) return 0.0f;  // must be meaningfully inverted
+	        return RS_CLAMP(invertedness, 0.0f, 1.0f);
+	    }
+	};
+
+	class AerialDistanceReward : public Reward {
+	public:
+		float heightScale;
+		float distanceScale;
+
+		static constexpr float RAMP_HEIGHT = 256.0f;
+
+	private:
+		float carDistance = 0.0f;
+		float ballDistance = 0.0f;
+		int currentCarId = 0; // 0 = no active aerial sequence
+
+	public:
+		AerialDistanceReward(float heightScale = 1.0f, float distanceScale = 1.0f)
+			: heightScale(heightScale), distanceScale(distanceScale) {}
+
+		virtual void Reset(const GameState& state) override {
+			currentCarId = 0;
+			carDistance = 0.0f;
+			ballDistance = 0.0f;
+		}
+
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			float reward = 0.0f;
+			bool isCurrent = (currentCarId != 0 && currentCarId == player.carId);
+
+			if (player.pos.z < RAMP_HEIGHT) {
+				// Player dropped below aerial threshold — end their active sequence
+				if (isCurrent) {
+					currentCarId = 0;
+					carDistance = 0.0f;
+					ballDistance = 0.0f;
+				}
+				return 0.0f;
+			}
+
+			if (player.ballTouchedStep && !isCurrent) {
+				// First aerial touch: reward proportional to combined height above ramp
+				isCurrent = true;
+				reward = heightScale * RS_MAX(player.pos.z + state.ball.pos.z - 2.0f * RAMP_HEIGHT, 0.0f);
+				carDistance = 0.0f;
+				ballDistance = 0.0f;
+			} else if (isCurrent) {
+				// Accumulate travel distances since last touch
+				if (state.prev && player.prev) {
+					carDistance += (player.pos - player.prev->pos).Length();
+					ballDistance += (state.ball.pos - state.prev->ball.pos).Length();
+				}
+
+				if (player.ballTouchedStep) {
+					// Consecutive aerial touch: reward by total distance covered
+					reward = distanceScale * (carDistance + ballDistance);
+					carDistance = 0.0f;
+					ballDistance = 0.0f;
+				}
+			}
+
+			if (isCurrent)
+				currentCarId = player.carId;
+
+			// Normalize by full field length so output stays in a bounded range
+			return reward / (2.0f * CommonValues::BACK_WALL_Y);
+		}
+	};
 
     class ConstantReward : public Reward {
     public:

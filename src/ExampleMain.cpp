@@ -43,14 +43,38 @@ EnvCreateResult EnvCreateFunc(int index) {
         // { new TouchBallReward(), 2.0f }, // COMENTADO: O bot estava a usar isto para fugir com a bola!
 
     //{ new GoalDistancePotentialReward(), 10.0f },
-	{ new VelocityPlayerToBallReward(), 0.5f },
 	//{ new FaceBallReward(), 0.5f },
 	//{ new AirReward(), 0.10f },
     //{ new SpeedReward(), 0.2f },
+	
+    // === REWARDS COMUNS ===
+    { new VelocityPlayerToBallReward(), 0.5f },
+    { new ConstantReward(), -0.3f }, // Penalidade constante fixa por tick vivido
+    { new BallTouchGroundPenalty(-10.0f), 1.0f }, // Penalidade brusca ao tocar a bola no chão
     { new VelocityBallToGoalReward(false), 0.8f },
-    { new ZeroSumReward(new GoalReward(), 1.0f, 1.0f), 50.0f },    
-    { new ConstantReward(), -0.1f }, // Penalidade constante fixa por tick vivido
-    { new BallTouchGroundPenalty(-20.0f), 1.0f }, // Penalidade brusca ao tocar a bola no chão
+    { new ZeroSumReward(new GoalReward(), 1.0f, 1.0f), 100.0f },    
+    { new TouchBallAerialReward(), 3.0f },       // 3x built-in aerial multiplier → ground touch = 3, aerial = 9
+    { new AirAlignmentReward(), 0.4f },    // rewards efficient trajectory toward ball, not just being airborne
+    { new AerialDistanceReward(), 0.4f },    // rewards how high the contact happens (add to CommonRewards.h)
+    { new AirReward(), 0.05f },
+
+    // === FASE 2 (Qualidade do aereo) ===
+    // -> Quando FASE 1 tiver 80% ep c toque
+    /*
+    { new VelocityBallToGoalReward(false), 1.5f },              // was 0.8 — shot direction matters more now
+    { new ZeroSumReward(new GoalReward(), 1.0f, 1.0f), 80.0f }, // was 50 — scoring is the priority
+    { new TouchBallAerialReward(), 1.5f },                            // was 3.0 — contact is expected now, not special
+    { new AerialDistanceReward(), 2.0f },    // rewards how high the contact happens (add to CommonRewards.h)
+    */
+
+    // === FASE 3 (Flip Reset) ===
+    // -> Quando FASE 2 tiver 80% ep c golo
+    /*
+    { new FlipResetReward(), 15.0f },
+    { new StrongTouchReward(30, 120), 2.0f },   // rewards clean powerful shots
+    */
+
+    // === REWARDS ANTIGOS ===
     //{ new BallBetweenPlayerAndGoalReward(), 0.5f },
     //{ new VeloAlignmentReward(), 2.0f },
     //{ new SpeedReward(), 0.5f },
@@ -61,6 +85,7 @@ EnvCreateResult EnvCreateFunc(int index) {
     //{ new ActionSmoothingPenalty(), -1.0f },
     //{ new CmonDoSomethingReward(), -0.4f }
     };
+
 
 	std::vector<TerminalCondition*> terminalConditions = {
 		new NoTouchCondition(4),
@@ -82,9 +107,9 @@ EnvCreateResult EnvCreateFunc(int index) {
     arena->AddCar(Team::BLUE, CAR_CONFIG_PLANK);
 
     std::vector<std::pair<StateSetter*, float>> weightedSetters = {
-        { new AirShotState(), 1.0f },           // Foco principal em remates aéreos!
-        { new TrackedGoalShotState(), 0.0f },
-        { new TrackedRandomState(true,false,true), 0.0f },
+        { new AirShotState(), 0.80f },           // Foco principal em remates aéreos!
+        { new TrackedGoalShotState(), 0.15f },
+        { new TrackedRandomState(true,false,true), 0.05f },
         { new KickoffState(), 0.0f },
         //{ new AttackerMidfieldState(), 0.0f },    
     }; //state setters, kickoff and randomstate weights go tune them yourself

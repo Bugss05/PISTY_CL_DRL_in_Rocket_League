@@ -57,8 +57,8 @@ namespace GGL {
 		// The receiver can then log them to wandb or whatever
 		bool sendMetrics = true;
 		std::string metricsProjectName = "gigalearncpp"; // Project name for the python metrics receiver
-		std::string metricsGroupName = "unnamed-runs"; // Group name for the python metrics receiver
-		std::string metricsRunName = "gigalearncpp-run"; // Run name for the python metrics receiver
+		std::string metricsGroupName = "Aerios"; // Group name for the python metrics receiver
+		std::string metricsRunName = "rewards aerios iniciais"; // Run name for the python metrics receiver
 
 		bool savePolicyVersions = false;
 		int64_t tsPerVersion = 25'000'000;
