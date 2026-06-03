@@ -599,4 +599,48 @@ namespace RLGC {
             return 1.0f;
         }
     };
+
+
+	// ====================================================
+	// Zeelan Rewards
+	// ====================================================
+
+	class GoalBonusReward : public Reward {
+	public:
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			if (!state.goalScored)
+				return 0;
+
+			// Bonus based on velocity of the ball when it crosses the goal line (up to 25% of the reward)
+			float ballSpeed = state.ball.vel.Length();
+			float speedBonus = RS_CLAMP(ballSpeed / CommonValues::BALL_MAX_SPEED, 0, 1);
+			
+			// Bonus based on how close the ball is to the nearest goal corner when it crosses the line (up to 25% of the reward)
+			bool targetOrangeGoal = player.team == Team::BLUE;
+			Vec targetPos = targetOrangeGoal ? CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
+			Vec goalCorners[4] = {
+				targetPos + Vec(-CommonValues::GOAL_WIDTH / 2, 0, 0) + Vec(0, 0, CommonValues::GOAL_HEIGHT), // Top left
+				targetPos + Vec(CommonValues::GOAL_WIDTH / 2, 0, 0) + Vec(0, 0, CommonValues::GOAL_HEIGHT), // Top right
+				targetPos + Vec(-CommonValues::GOAL_WIDTH / 2, 0, 0), // Bottom left
+				targetPos + Vec(CommonValues::GOAL_WIDTH / 2, 0, 0) // Bottom right
+			};
+			float closestDist = FLT_MAX;
+
+			for (int i = 0; i < 4; i++) {
+				float dist = (state.ball.pos - goalCorners[i]).Length();
+				if (dist < closestDist) {
+					closestDist = dist;
+				}
+			}
+			float cornerBonus = RS_CLAMP(1 - (closestDist / CommonValues::GOAL_WIDTH), 0, 1);
+
+			float bonus = speedBonus * 0.25f + cornerBonus * 0.25f; // up to 0.5
+
+
+			// Give +bonus to scoring players, -bonus to others (zero-sum)
+			bool scored = (player.team != RS_TEAM_FROM_Y(state.ball.pos.y));
+			return scored ? bonus : -bonus;
+		}
+	};
+
 }
