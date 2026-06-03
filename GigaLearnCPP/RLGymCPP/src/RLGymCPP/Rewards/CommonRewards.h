@@ -611,6 +611,8 @@ namespace RLGC {
 			if (!state.goalScored)
 				return 0;
 
+
+			float baseReward = 1.0f; // base reward for scoring a goal
 			// Bonus based on velocity of the ball when it crosses the goal line (up to 25% of the reward)
 			float ballSpeed = state.ball.vel.Length();
 			float speedBonus = RS_CLAMP(ballSpeed / CommonValues::BALL_MAX_SPEED, 0, 1);
@@ -636,11 +638,32 @@ namespace RLGC {
 
 			float bonus = speedBonus * 0.25f + cornerBonus * 0.25f; // up to 0.5
 
-
+			baseReward += bonus;
 			// Give +bonus to scoring players, -bonus to others (zero-sum)
 			bool scored = (player.team != RS_TEAM_FROM_Y(state.ball.pos.y));
-			return scored ? bonus : -bonus;
+			return scored ? baseReward : -baseReward;
+
+			// this reward is [0, 1.5]. if we want to keep between [0, 1] we can divide by 1.5, 
+			// but I think it's fine to have some rewards above 1 as long as they are not too high 
+			// compared to other rewards in the vector
 		}
 	};
+
+	class AirCloserToBallReward : public Reward {
+	public:
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+
+			if (state.ball.pos.z < 350.0f) return 0.0f; // Only reward when the ball is in the air
+			if (player.isOnGround) return 0.0f;
+			if (!state.prev) return 0.0f;
+
+			float prevDist = (state.prev->ball.pos - player.prev->pos).Length();
+			float currentDist = (state.ball.pos - player.pos).Length();
+
+			// Reward is positive if we got closer to the ball, negative if we got farther, and scaled by the change in distance
+			return prevDist - currentDist;
+		}
+	};
+
 
 }
