@@ -48,6 +48,7 @@ json PlayerToJSON(const Player& player) {
 	j["ball_touched"] = player.ballTouchedStep;
 	j["has_flip"] = player.HasFlipOrJump();
 	j["boost_amount"] = player.boost / 100;
+	j["is_boosting"] = player.lastControls.boost;
 
 	return j;
 }

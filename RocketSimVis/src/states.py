@@ -161,7 +161,11 @@ class CarState:
         if not (j.get("controls") is None):
             self.controls.read_from_json(j["controls"])
 
-        self.is_boosting = j["boost_amount"] < self.boost_amount
+        if "is_boosting" in j:
+            self.is_boosting = j["is_boosting"]
+        else:
+            self.is_boosting = j["boost_amount"] < self.boost_amount
+            
         self.boost_amount = j["boost_amount"]
         self.on_ground = j["on_ground"]
         if not (j.get("has_flipped_or_double_jumped") is None):
