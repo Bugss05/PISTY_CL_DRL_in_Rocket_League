@@ -3,6 +3,7 @@ Just replace this with your original examplemain.cpp file in your GigalearnCPP-L
 	*/
 
 #include <GigaLearnCPP/Learner.h>
+#include "config.h"
 
 #include <RLGymCPP/Rewards/CommonRewards.h>
 #include <RLGymCPP/Rewards/ZeroSumReward.h>
@@ -157,7 +158,7 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
 }
 
 int main(int argc, char* argv[]) {
-    RocketSim::Init("/home/bugss/Desktop/Robotica/collision_meshes"); //INCLUDE YOUR COLLISION MESHES
+    RocketSim::Init(CONFIG_COLLISION_MESHES);
 
     LearnerConfig cfg = {};
     cfg.deviceType = LearnerDeviceType::GPU_CUDA;
