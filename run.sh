@@ -16,7 +16,11 @@ BIN_PATH="$PROJECT_ROOT/build"
 
 # --- VARIÁVEIS DE AMBIENTE (Essenciais para a tua GPU) ---
 export HSA_OVERRIDE_GFX_VERSION=12.0.1
-export AMD_SERIALIZE_KERNEL=3
+# AMD_SERIALIZE_KERNEL=3  # DEBUG ONLY — serializa kernels GPU, mata throughput
+# Performance ROCm (9070XT / gfx1201)
+export ROCR_VISIBLE_DEVICES=0          # garante que só usa a GPU primária
+export HIP_FORCE_DEV_KERNARG=1         # reduz overhead de cópia de argumentos de kernel
+export MALLOC_ARENA_MAX=4              # limita fragmentação de memória do allocator C
 export PYTHONHOME="/usr"
 export PYTHONPATH="/usr/local/lib/python3.12/dist-packages:$BIN_PATH/python_scripts"
 export LD_LIBRARY_PATH="/opt/rocm/lib:$LD_LIBRARY_PATH"

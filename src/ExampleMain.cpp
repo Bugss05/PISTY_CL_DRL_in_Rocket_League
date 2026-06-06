@@ -16,7 +16,12 @@ Just replace this with your original examplemain.cpp file in your GigalearnCPP-L
 #include <RLGymCPP/StateSetters/AttackerMidfieldState.h>
 #include <RLGymCPP/StateSetters/CombinedState.h>
 #include <RLGymCPP/StateSetters/AirShotState.h>
+#include <RLGymCPP/StateSetters/FallingBallApproachState.h>
+#include <RLGymCPP/StateSetters/PassState.h>
+#include <RLGymCPP/StateSetters/StaticAerialState.h>
+#include <RLGymCPP/StateSetters/CrossState.h>
 #include <RLGymCPP/ActionParsers/DefaultAction.h>
+#include <RLGymCPP/StateSetters/WallDragState.h>
 //include all of our directories to compile the Gigalearnbot.exe
 #include "TrackedStates.h"
 
@@ -40,55 +45,22 @@ int GetRandomTeamSize() {
 EnvCreateResult EnvCreateFunc(int index) {
 	
 	std::vector<WeightedReward> rewards = {
-        // { new TouchBallReward(), 2.0f }, // COMENTADO: O bot estava a usar isto para fugir com a bola!
 
-    //{ new GoalDistancePotentialReward(), 10.0f },
-	//{ new FaceBallReward(), 0.5f },
-	//{ new AirReward(), 0.10f },
-    //{ new SpeedReward(), 0.2f },
-	
-    // === REWARDS COMUNS ===
     { new VelocityPlayerToBallReward(), 0.5f },
     { new ConstantReward(), -0.3f }, // Penalidade constante fixa por tick vivido
-    { new BallTouchGroundPenalty(-10.0f), 1.0f }, // Penalidade brusca ao tocar a bola no chão
+    { new BallTouchGroundPenalty(-10.0f), 0.01f }, // Penalidade brusca ao tocar a bola no chão
     { new VelocityBallToGoalReward(false), 0.8f },
     { new ZeroSumReward(new GoalReward(), 1.0f, 1.0f), 100.0f },    
     { new TouchBallAerialReward(), 3.0f },       // 3x built-in aerial multiplier → ground touch = 3, aerial = 9
     { new AirAlignmentReward(), 0.4f },    // rewards efficient trajectory toward ball, not just being airborne
     { new AerialDistanceReward(), 0.4f },    // rewards how high the contact happens (add to CommonRewards.h)
     { new AirReward(), 0.05f },
-
-    // === FASE 2 (Qualidade do aereo) ===
-    // -> Quando FASE 1 tiver 80% ep c toque
-    /*
-    { new VelocityBallToGoalReward(false), 1.5f },              // was 0.8 — shot direction matters more now
-    { new ZeroSumReward(new GoalReward(), 1.0f, 1.0f), 80.0f }, // was 50 — scoring is the priority
-    { new TouchBallAerialReward(), 1.5f },                            // was 3.0 — contact is expected now, not special
-    { new AerialDistanceReward(), 2.0f },    // rewards how high the contact happens (add to CommonRewards.h)
-    */
-
-    // === FASE 3 (Flip Reset) ===
-    // -> Quando FASE 2 tiver 80% ep c golo
-    /*
-    { new FlipResetReward(), 15.0f },
-    { new StrongTouchReward(30, 120), 2.0f },   // rewards clean powerful shots
-    */
-
-    // === REWARDS ANTIGOS ===
-    //{ new BallBetweenPlayerAndGoalReward(), 0.5f },
-    //{ new VeloAlignmentReward(), 2.0f },
-    //{ new SpeedReward(), 0.5f },
-    //{ new StrongTouchReward(20, 100), 30.0f },
-    //{ new VelocityBallToGoalReward(false), 25.0f },
-    //{ new GoalDistancePotentialReward(), 40.0f },
-    //{ new GoalReward(), 300.0f },
-    //{ new ActionSmoothingPenalty(), -1.0f },
-    //{ new CmonDoSomethingReward(), -0.4f }
     };
 
 
+
 	std::vector<TerminalCondition*> terminalConditions = {
-		new NoTouchCondition(4),
+		new NoTouchCondition(2),
 		new GoalScoreCondition(),
 		new TimeoutCondition(60.0f) // Termina/reseta se o jogo rolar por 1 minuto (60 segs) sem golo
 	};
@@ -107,11 +79,17 @@ EnvCreateResult EnvCreateFunc(int index) {
     arena->AddCar(Team::BLUE, CAR_CONFIG_PLANK);
 
     std::vector<std::pair<StateSetter*, float>> weightedSetters = {
-        { new AirShotState(), 0.80f },           // Foco principal em remates aéreos!
-        { new TrackedGoalShotState(), 0.15f },
-        { new TrackedRandomState(true,false,true), 0.05f },
+        { new AirShotState(), 0.0f },           // Foco principal em remates aéreos!
+        { new TrackedGoalShotState(), 0.0f },
+        { new TrackedRandomState(true,false,true), 0.0f },
+        { new TrackedFallingBallApproachState(), 0.0f }, // Bola a cair no meio campo adversário, carro no chão
+        { new PassState(), 0.0f },                        // Passe: bola a meia altura com vel horizontal, carro aleatório
         { new KickoffState(), 0.0f },
-        //{ new AttackerMidfieldState(), 0.0f },    
+        { new StaticAerialState(), 0.0f },
+        { new CrossState(), 0.0f },
+        { new WallDragState(), 1.0f },
+        
+        //{ new AttackerMidfieldState(), 0.0f },
     }; //state setters, kickoff and randomstate weights go tune them yourself
     CombinedState* combinedSetter = new CombinedState(weightedSetters);
 
@@ -135,14 +113,17 @@ extern std::atomic<int> g_totalGoals;
 void StepCallback(Learner* learner, const std::vector<GameState>& states, Report& report) {
 
     bool doExpensiveMetrics = (rand() % 4) == 0;
+    int fbSteps = 0, fbGoals = 0;
+
     for (auto& state : states) {
         if (state.goalScored) {
-            if (IsArenaGoalShot(state.lastArena)) {
-
+            if (IsArenaGoalShot(state.lastArena))
                 g_totalGoals++;
+        }
 
-            }
-
+        if (IsArenaFallingBall(state.lastArena)) {
+            fbSteps++;
+            if (state.goalScored) fbGoals++;
         }
 
         if (doExpensiveMetrics) {
@@ -161,7 +142,19 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
         if (state.goalScored)
             report.AddAvg("Game/Goal Speed", state.ball.vel.Length());
     }
-} //them metrics, I dont use metrics tho
+
+    // Uma vez por iteração PPO (262144 steps totais)
+    g_fallingBallGoals += fbGoals;
+    int totalSteps = (g_fallingBallSteps += fbSteps);
+    if (totalSteps >= 262144) {
+        int actual = g_fallingBallSteps.exchange(0);
+        if (actual >= 262144) {
+            int goals = g_fallingBallGoals.exchange(0);
+            printf("[FallingBall] %d golos em %d steps | %.1f%% win rate\n",
+                   goals, actual, (float)goals / actual * 100.f);
+        }
+    }
+}
 
 int main(int argc, char* argv[]) {
     RocketSim::Init("/home/bugss/Desktop/Robotica/collision_meshes"); //INCLUDE YOUR COLLISION MESHES
@@ -170,17 +163,17 @@ int main(int argc, char* argv[]) {
     cfg.deviceType = LearnerDeviceType::GPU_CUDA;
     cfg.tickSkip = 8; //tick skip, if you change this you should change gamma
     cfg.actionDelay = cfg.tickSkip - 1;
-    cfg.numGames = 96; // 5800X3D tem 16 threads — começa em 96, sobe para 128/160 se Env Step Time < Inference Time no wandb
+    cfg.numGames = 576; // inference ≈ env_step: ajustar com formula numGames*(envStep/inferenceTime)
 
     cfg.ppo.tsPerItr = 262144;
     cfg.ppo.batchSize = 262144;
     cfg.ppo.miniBatchSize = 131072; // 262144 / 131072 = 2 — divisivel; 9070 XT tem 16GB VRAM
-    cfg.ppo.epochs = 2; // usa cada batch de dados duas vezes — mais aprendizagem por iteracao
+    cfg.ppo.epochs = 1; // usa cada batch de dados duas vezes — mais aprendizagem por iteracao
     cfg.ppo.entropyScale = 0.035f; //this is a good starting point, lower it if your bot is like very good, or you just want to refine what it already knows                              
     cfg.ppo.gaeGamma = 0.99f; //start with .99, then up to .993 once it can hit ball and shoot ball on net, then .995 once it learns dribbles and powershots, .997 once it gets better than necto.
     cfg.ppo.policyLR = 2e-4f;
     cfg.ppo.criticLR = 2e-4f; //learning rates. start out high, then lower to 1.5e-4 when it learns to shoot and touch ball, then 1e-4 once it learns dribbles, then 0.8e-4 once it is around nexto level.
-    cfg.ppo.sharedHead.layerSizes = { 1024, 1024, 1024}; //your bot has a shared head, both the cpu and critic learn from this, this should be big sizes
+    cfg.ppo.sharedHead.layerSizes = { 1024,1024, 512, 512 }; // power-of-2 → kernels GPU ideais; 768 = 3×256, desalinhado, throughput pior
     cfg.ppo.policy.layerSizes = { 256, 256, 256 };
     cfg.ppo.critic.layerSizes = { 256, 256, 256 }; //these are pretty good, DO NOT INCREASE IT FURTHER
 
