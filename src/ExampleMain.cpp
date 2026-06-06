@@ -116,7 +116,7 @@ EnvCreateResult EnvCreateFunc(int index) {
     CombinedState* combinedSetter = new CombinedState(weightedSetters);
 
     // Padded observation builder for up to 3 players per team, if your just training 1v1, just use advanced obs and only train ones, just remove the state setter
-    auto obsBuilder = new DefaultObsPadded(3);
+    auto obsBuilder = new DefaultObsPadded(1);
     auto actionParser = new DefaultAction();
 
     EnvCreateResult result = {};
@@ -170,12 +170,12 @@ int main(int argc, char* argv[]) {
     cfg.deviceType = LearnerDeviceType::GPU_CUDA;
     cfg.tickSkip = 8; //tick skip, if you change this you should change gamma
     cfg.actionDelay = cfg.tickSkip - 1;
-    cfg.numGames =350; //adjust to how good your cpu is, mine is a i7-12700k and 192 games is optimal for me. The better your cpu is, the more games you should have.
+    cfg.numGames = 96; // 5800X3D tem 16 threads — começa em 96, sobe para 128/160 se Env Step Time < Inference Time no wandb
 
-    cfg.ppo.tsPerItr = 196608;  
-    cfg.ppo.batchSize = 196608; //how much your bot trains at a time
-    cfg.ppo.miniBatchSize = 98304; //minibatch size. if you have small pc, 25k is good, if you have a powerful pc (4070ti or better) 75k might be optimal
-    cfg.ppo.epochs = 1; //start out with one epoch, and once your bot gets better increase this to two
+    cfg.ppo.tsPerItr = 262144;
+    cfg.ppo.batchSize = 262144;
+    cfg.ppo.miniBatchSize = 131072; // 262144 / 131072 = 2 — divisivel; 9070 XT tem 16GB VRAM
+    cfg.ppo.epochs = 2; // usa cada batch de dados duas vezes — mais aprendizagem por iteracao
     cfg.ppo.entropyScale = 0.035f; //this is a good starting point, lower it if your bot is like very good, or you just want to refine what it already knows                              
     cfg.ppo.gaeGamma = 0.99f; //start with .99, then up to .993 once it can hit ball and shoot ball on net, then .995 once it learns dribbles and powershots, .997 once it gets better than necto.
     cfg.ppo.policyLR = 2e-4f;
@@ -191,6 +191,8 @@ int main(int argc, char* argv[]) {
     cfg.ppo.sharedHead.addLayerNorm = true; // if you decide not to use sharedhead(why would you not?) set this to false
     cfg.ppo.policy.addLayerNorm = true; // dont touch
     cfg.ppo.critic.addLayerNorm = true; // dont touch
+
+    cfg.ppo.useHalfPrecision = true; // FP16 inference — 9070 XT (RDNA4) tem 2x throughput em FP16 vs FP32, treino continua em FP32
 
     cfg.skillTracker.enabled = false; // Desativado para parar os test matches
     cfg.skillTracker.numArenas = 8;
