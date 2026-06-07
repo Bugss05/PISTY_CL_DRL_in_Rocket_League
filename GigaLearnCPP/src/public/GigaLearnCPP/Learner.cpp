@@ -154,6 +154,14 @@ GGL::Learner::Learner(EnvCreateFn envCreateFn, LearnerConfig config, StepCallbac
 	RG_LOG(RG_DIVIDER);
 }
 
+void GGL::Learner::SetLearningRates(float policyLR, float criticLR) {
+	ppo->SetLearningRates(policyLR, criticLR);
+}
+
+GGL::PPOLearnerConfig& GGL::Learner::GetLivePPOConfig() {
+	return ppo->config;
+}
+
 void GGL::Learner::SaveStats(std::filesystem::path path) {
 	using namespace nlohmann;
 

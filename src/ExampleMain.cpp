@@ -25,6 +25,8 @@ Just replace this with your original examplemain.cpp file in your GigalearnCPP-L
 #include <RLGymCPP/StateSetters/WallDragState.h>
 //include all of our directories to compile the Gigalearnbot.exe
 #include "TrackedStates.h"
+#include "SchedulableState.h"
+#include "Scheduler.h"
 
 
 
@@ -45,18 +47,28 @@ int GetRandomTeamSize() {
 
 EnvCreateResult EnvCreateFunc(int index) {
 	
-	std::vector<WeightedReward> rewards = {
-
-    { new VelocityPlayerToBallReward(), 0.5f },
-    { new ConstantReward(), -0.3f }, // Penalidade constante fixa por tick vivido
-    { new BallTouchGroundPenalty(-10.0f), 0.01f }, // Penalidade brusca ao tocar a bola no chão
-    { new VelocityBallToGoalReward(false), 0.8f },
-    { new ZeroSumReward(new GoalReward(), 1.0f, 1.0f), 100.0f },    
-    { new TouchBallAerialReward(), 3.0f },       // 3x built-in aerial multiplier → ground touch = 3, aerial = 9
-    { new AirAlignmentReward(), 0.4f },    // rewards efficient trajectory toward ball, not just being airborne
-    { new AerialDistanceReward(), 0.4f },    // rewards how high the contact happens (add to CommonRewards.h)
-    { new AirReward(), 0.05f },
+    // Nome (usado no SchedulerConfig) + reward + peso inicial. A ordem é fixa em todas as
+    // arenas, por isso o Scheduler casa nome->índice de forma robusta (ver g_rewardNames).
+    struct NamedReward { std::string name; Reward* reward; float weight; };
+    std::vector<NamedReward> namedRewards = {
+        { "VelocityPlayerToBall", new VelocityPlayerToBallReward(),          0.5f },
+        { "ConstantPenalty",      new ConstantReward(),                     -0.3f }, // Penalidade constante fixa por tick vivido
+        { "BallTouchGround",      new BallTouchGroundPenalty(-10.0f),        0.01f }, // Penalidade brusca ao tocar a bola no chão
+        { "VelocityBallToGoal",   new VelocityBallToGoalReward(false),       0.8f },
+        { "Goal",                 new ZeroSumReward(new GoalReward(), 1.0f, 1.0f), 100.0f },
+        { "TouchBallAerial",      new TouchBallAerialReward(),               3.0f }, // 3x built-in aerial multiplier → ground=3, aéreo=9
+        { "AirAlignment",         new AirAlignmentReward(),                  0.4f }, // trajetória eficiente até à bola
+        { "AerialDistance",       new AerialDistanceReward(),                0.4f }, // altura do contacto
+        { "Air",                  new AirReward(),                           0.05f },
     };
+
+    std::vector<WeightedReward> rewards;
+    std::vector<std::string> rewardNames;
+    for (auto& nr : namedRewards) {
+        rewards.push_back({ nr.reward, nr.weight });
+        rewardNames.push_back(nr.name);
+    }
+    RegisterRewardNames(rewardNames); // regista uma vez (call_once); o Scheduler usa para o matching
 
 
 
@@ -79,20 +91,19 @@ EnvCreateResult EnvCreateFunc(int index) {
     // Auto add a car to BLUE only, so only 1 car exists in the arena
     arena->AddCar(Team::BLUE, CAR_CONFIG_PLANK);
 
-    std::vector<std::pair<StateSetter*, float>> weightedSetters = {
-        { new AirShotState(), 0.0f },           // Foco principal em remates aéreos!
-        { new TrackedGoalShotState(), 0.0f },
-        { new TrackedRandomState(true,false,true), 0.0f },
-        { new TrackedFallingBallApproachState(), 0.0f }, // Bola a cair no meio campo adversário, carro no chão
-        { new PassState(), 0.0f },                        // Passe: bola a meia altura com vel horizontal, carro aleatório
-        { new KickoffState(), 0.0f },
-        { new StaticAerialState(), 0.0f },
-        { new CrossState(), 0.0f },
-        { new WallDragState(), 1.0f },
-        
-        //{ new AttackerMidfieldState(), 0.0f },
-    }; //state setters, kickoff and randomstate weights go tune them yourself
-    CombinedState* combinedSetter = new CombinedState(weightedSetters);
+    // SchedulableState: as labels ("AirShot", "WallDrag", ...) são o que referencias em
+    // SchedulerConfig.h (stateWeights). O Scheduler muda estes pesos por fase em runtime.
+    SchedulableState* combinedSetter = new SchedulableState({
+        { "AirShot",      new AirShotState(),                    0.0f }, // Foco principal em remates aéreos!
+        { "GoalShot",     new TrackedGoalShotState(),            0.0f },
+        { "Random",       new TrackedRandomState(true,false,true), 0.0f },
+        { "FallingBall",  new TrackedFallingBallApproachState(), 0.0f }, // Bola a cair no meio campo adversário, carro no chão
+        { "Pass",         new PassState(),                       0.0f }, // Passe: bola a meia altura com vel horizontal, carro aleatório
+        { "Kickoff",      new KickoffState(),                    0.0f },
+        { "StaticAerial", new StaticAerialState(),               0.0f },
+        { "Cross",        new CrossState(),                      0.0f },
+        { "WallDrag",     new WallDragState(),                   1.0f },
+    }, /*stochastic*/ true); // pesos iniciais; o Scheduler sobrepõe-se conforme a fase
 
     // Padded observation builder for up to 3 players per team, if your just training 1v1, just use advanced obs and only train ones, just remove the state setter
     auto obsBuilder = new DefaultObsPadded(1);
@@ -111,7 +122,12 @@ EnvCreateResult EnvCreateFunc(int index) {
 
 extern std::atomic<int> g_totalGoals;
 
+// Scheduler do currículo — aplica os parâmetros da fase atual (PPO + rewards + state setters).
+Scheduler g_scheduler;
+
 void StepCallback(Learner* learner, const std::vector<GameState>& states, Report& report) {
+
+    g_scheduler.Update(learner); // barato e idempotente: corre 1x por iteração
 
     bool doExpensiveMetrics = (rand() % 4) == 0;
     int fbSteps = 0, fbGoals = 0;

@@ -1,0 +1,29 @@
+{
+    "configurations": [
+        {
+            "name": "Win32",
+            "includePath": [
+                "${workspaceFolder}/src",
+                "${workspaceFolder}/GigaLearnCPP/src/public",
+                "${workspaceFolder}/GigaLearnCPP/src/private",
+                "${workspaceFolder}/GigaLearnCPP/src",
+                "${workspaceFolder}/GigaLearnCPP/RLGymCPP/src",
+                "${workspaceFolder}/GigaLearnCPP/RLGymCPP/RocketSim/src",
+                "${workspaceFolder}/GigaLearnCPP/libsrc/json",
+                "${workspaceFolder}/GigaLearnCPP/pybind11/include",
+                "${workspaceFolder}/GigaLearnCPP/libtorch/include",
+                "${workspaceFolder}/GigaLearnCPP/libtorch/include/torch/csrc/api/include",
+                "C:/Python314/include"
+            ],
+            "defines": [
+                "_WIN32",
+                "NOMINMAX"
+            ],
+            "compilerPath": "C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe",
+            "cStandard": "c17",
+            "cppStandard": "c++20",
+            "intelliSenseMode": "windows-msvc-x64"
+        }
+    ],
+    "version": 4
+}

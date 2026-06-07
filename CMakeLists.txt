@@ -21,3 +21,9 @@ target_link_libraries(GigaLearnBot GigaLearnCPP)
 # Include RLBot
 add_subdirectory(RLBotCPP)
 target_link_libraries(GigaLearnBot RLBotCPP)
+
+# --- Teste standalone da lógica do scheduler (sem torch/Learner) ---
+# Build: cmake --build build --config Release --target scheduler_test
+add_executable(scheduler_test "tests/scheduler_test.cpp")
+target_include_directories(scheduler_test PRIVATE "src")
+set_target_properties(scheduler_test PROPERTIES CXX_STANDARD 20 LINKER_LANGUAGE CXX)

@@ -8,14 +8,14 @@ REM --- CONFIGURAÇÕES ---
 set LOG_FILE=crash_report.log
 set TEMP_LIMIT=90
 set COOL_DOWN=600
-set PROJECT_ROOT=C:\Users\diogo\OneDrive\Área de Trabalho\LIACD\3_ANO\IRI\Robotica
+set PROJECT_ROOT=C:\Robotica
 set BIN_PATH=%PROJECT_ROOT%\build
 set BUILD_DIR=%PROJECT_ROOT%\build
 
 REM --- VARIÁVEIS DE AMBIENTE ---
 set HSA_OVERRIDE_GFX_VERSION=12.0.1
 set AMD_SERIALIZE_KERNEL=3
-set PYTHONHOME=C:\Python312
+set PYTHONHOME=C:\Python314
 set PYTHONPATH=%BIN_PATH%\python_scripts
 
 REM Build
