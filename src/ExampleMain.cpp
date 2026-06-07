@@ -120,28 +120,17 @@ EnvCreateResult EnvCreateFunc(int index) {
     return result;
 }
 
-extern std::atomic<int> g_totalGoals;
-
-// Scheduler do currículo — aplica os parâmetros da fase atual (PPO + rewards + state setters).
 Scheduler g_scheduler;
 
 void StepCallback(Learner* learner, const std::vector<GameState>& states, Report& report) {
 
-    g_scheduler.Update(learner); // barato e idempotente: corre 1x por iteração
+    g_scheduler.Update(learner, report); // 1x por iteração: recolhe stats, avança fase se necessário
 
     bool doExpensiveMetrics = (rand() % 4) == 0;
-    int fbSteps = 0, fbGoals = 0;
 
     for (auto& state : states) {
-        if (state.goalScored) {
-            if (IsArenaGoalShot(state.lastArena))
-                g_totalGoals++;
-        }
-
-        if (IsArenaFallingBall(state.lastArena)) {
-            fbSteps++;
-            if (state.goalScored) fbGoals++;
-        }
+        if (state.goalScored)
+            g_scheduler.OnGoalScored(state.lastArena);
 
         if (doExpensiveMetrics) {
             for (auto& player : state.players) {
@@ -158,18 +147,6 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
         }
         if (state.goalScored)
             report.AddAvg("Game/Goal Speed", state.ball.vel.Length());
-    }
-
-    // Uma vez por iteração PPO (262144 steps totais)
-    g_fallingBallGoals += fbGoals;
-    int totalSteps = (g_fallingBallSteps += fbSteps);
-    if (totalSteps >= 262144) {
-        int actual = g_fallingBallSteps.exchange(0);
-        if (actual >= 262144) {
-            int goals = g_fallingBallGoals.exchange(0);
-            printf("[FallingBall] %d golos em %d steps | %.1f%% win rate\n",
-                   goals, actual, (float)goals / actual * 100.f);
-        }
     }
 }
 
