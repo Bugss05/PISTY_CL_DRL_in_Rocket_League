@@ -1,44 +1,54 @@
 #!/bin/bash
-cd "build"
-make -j$(nproc) || { echo "Erro ao compilar! A cancelar arranque."; exit 1; }
-cd ..
 
-# compilar tudo ter em modo Release
-#cd /home/bugss/Desktop/Robotica/build
-#cmake .. -DCMAKE_PREFIX_PATH="/home/bugss/Desktop/Robotica/GigaLearnCPP/libtorch" -DCMAKE_BUILD_TYPE=Release
-#make -j$(nproc)
+# Lê um valor do src/config.h — ex: cfg CONFIG_PROJECT_ROOT
+cfg() { grep -E "^#define $1 " "$(dirname "$0")/src/config.h" | sed 's/.*"\(.*\)".*/\1/'; }
+
+PROJECT_ROOT=$(cfg CONFIG_PROJECT_ROOT)
+LIBTORCH_PATH=$(cfg CONFIG_LIBTORCH_PATH)
+PYTHON_HOME=$(cfg CONFIG_PYTHON_HOME)
+PYTHON_PACKAGES=$(cfg CONFIG_PYTHON_PACKAGES)
+ROCM_LIB=$(cfg CONFIG_ROCM_LIB)
+BIN_PATH="$PROJECT_ROOT/build"
+
+cd "$PROJECT_ROOT/build"
+make -j$(nproc) || { echo "Erro ao compilar! A cancelar arranque."; exit 1; }
+cd "$PROJECT_ROOT"
+
+# Para compilar de raiz com cmake (só precisas quando adicionas ficheiros .cpp novos):
+#   cd "$PROJECT_ROOT/build"
+#   cmake .. -DCMAKE_PREFIX_PATH="$LIBTORCH_PATH" -DCMAKE_BUILD_TYPE=Release
+#   make -j$(nproc)
+
 # --- CONFIGURAÇÕES ---
 LOG_FILE="crash_report.log"
 TEMP_LIMIT=90
-COOL_DOWN=600 # 10 minutos em segundos
-PROJECT_ROOT="/home/bugss/Desktop/Robotica"
-BIN_PATH="$PROJECT_ROOT/build"
+COOL_DOWN=600
 
 # --- VARIÁVEIS DE AMBIENTE (Essenciais para a tua GPU) ---
 export HSA_OVERRIDE_GFX_VERSION=12.0.1
-export AMD_SERIALIZE_KERNEL=3
-export PYTHONHOME="/usr"
-export PYTHONPATH="/usr/local/lib/python3.12/dist-packages:$BIN_PATH/python_scripts"
-export LD_LIBRARY_PATH="/opt/rocm/lib:$LD_LIBRARY_PATH"
+# AMD_SERIALIZE_KERNEL=3  # DEBUG ONLY — serializa kernels GPU, mata throughput
+export ROCR_VISIBLE_DEVICES=0          # garante que só usa a GPU primária
+export HIP_FORCE_DEV_KERNARG=1         # reduz overhead de cópia de argumentos de kernel
+export MALLOC_ARENA_MAX=4              # limita fragmentação de memória do allocator C
+export PYTHONHOME="$PYTHON_HOME"
+export PYTHONPATH="$PYTHON_PACKAGES:$BIN_PATH/python_scripts"
+export LD_LIBRARY_PATH="$ROCM_LIB:$LD_LIBRARY_PATH"
 
 while true; do
     echo "[$(date)] A iniciar GigaLearnBot..." | tee -a "$LOG_FILE"
-    
+
     cd "$BIN_PATH"
     ./GigaLearnBot
-    
-    # Captura o erro (Exit Code)
+
     EXIT_CODE=$?
-    
+
     if [ $EXIT_CODE -ne 0 ]; then
         echo "[$(date)] CRASH DETETADO! Código: $EXIT_CODE" | tee -a "$LOG_FILE"
-        
-        # Obtém a temperatura atual da GPU (Sensor Edge)
-        # Usamos o rocm-smi para extrair apenas o número
+
         GPU_TEMP=$(rocm-smi --showtemp | grep -m 1 'Temperature' | awk '{print $2}' | cut -d'.' -f1)
-        
+
         echo "Temperatura da GPU: ${GPU_TEMP}°C" | tee -a "$LOG_FILE"
-        
+
         if [ "$GPU_TEMP" -gt "$TEMP_LIMIT" ]; then
             echo "ALERTA: GPU a ${GPU_TEMP}°C! A arrefecer por 10 minutos..." | tee -a "$LOG_FILE"
             sleep $COOL_DOWN
@@ -48,6 +58,6 @@ while true; do
         fi
     else
         echo "[$(date)] Bot fechado manualmente ou finalizado com sucesso." | tee -a "$LOG_FILE"
-        break # Sai do loop se tu fechares o programa normalmente
+        break
     fi
 done

@@ -70,3 +70,4 @@ collision_meshes/
 *.zip
 *.slnx
 Videos/
+src/config.h

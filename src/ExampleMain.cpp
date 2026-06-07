@@ -3,6 +3,7 @@ Just replace this with your original examplemain.cpp file in your GigalearnCPP-L
 	*/
 
 #include <GigaLearnCPP/Learner.h>
+#include "config.h"
 
 #include <RLGymCPP/Rewards/CommonRewards.h>
 #include <RLGymCPP/Rewards/ZeroSumReward.h>
@@ -16,9 +17,16 @@ Just replace this with your original examplemain.cpp file in your GigalearnCPP-L
 #include <RLGymCPP/StateSetters/AttackerMidfieldState.h>
 #include <RLGymCPP/StateSetters/CombinedState.h>
 #include <RLGymCPP/StateSetters/AirShotState.h>
+#include <RLGymCPP/StateSetters/FallingBallApproachState.h>
+#include <RLGymCPP/StateSetters/PassState.h>
+#include <RLGymCPP/StateSetters/StaticAerialState.h>
+#include <RLGymCPP/StateSetters/CrossState.h>
 #include <RLGymCPP/ActionParsers/DefaultAction.h>
+#include <RLGymCPP/StateSetters/WallDragState.h>
 //include all of our directories to compile the Gigalearnbot.exe
 #include "TrackedStates.h"
+#include "SchedulableState.h"
+#include "Scheduler.h"
 
 
 
@@ -39,31 +47,33 @@ int GetRandomTeamSize() {
 
 EnvCreateResult EnvCreateFunc(int index) {
 	
-	std::vector<WeightedReward> rewards = {
-        // { new TouchBallReward(), 2.0f }, // COMENTADO: O bot estava a usar isto para fugir com a bola!
-
-    //{ new GoalDistancePotentialReward(), 10.0f },
-	{ new VelocityPlayerToBallReward(), 0.5f },
-	//{ new FaceBallReward(), 0.5f },
-	//{ new AirReward(), 0.10f },
-    //{ new SpeedReward(), 0.2f },
-    { new VelocityBallToGoalReward(false), 0.8f },
-    { new ZeroSumReward(new GoalReward(), 1.0f, 1.0f), 50.0f },    
-    { new ConstantReward(), -0.1f }, // Penalidade constante fixa por tick vivido
-    { new BallTouchGroundPenalty(-20.0f), 1.0f }, // Penalidade brusca ao tocar a bola no chão
-    //{ new BallBetweenPlayerAndGoalReward(), 0.5f },
-    //{ new VeloAlignmentReward(), 2.0f },
-    //{ new SpeedReward(), 0.5f },
-    //{ new StrongTouchReward(20, 100), 30.0f },
-    //{ new VelocityBallToGoalReward(false), 25.0f },
-    //{ new GoalDistancePotentialReward(), 40.0f },
-    //{ new GoalReward(), 300.0f },
-    //{ new ActionSmoothingPenalty(), -1.0f },
-    //{ new CmonDoSomethingReward(), -0.4f }
+    // Nome (usado no SchedulerConfig) + reward + peso inicial. A ordem é fixa em todas as
+    // arenas, por isso o Scheduler casa nome->índice de forma robusta (ver g_rewardNames).
+    struct NamedReward { std::string name; Reward* reward; float weight; };
+    std::vector<NamedReward> namedRewards = {
+        { "VelocityPlayerToBall", new VelocityPlayerToBallReward(),          0.5f },
+        { "ConstantPenalty",      new ConstantReward(),                     -0.3f }, // Penalidade constante fixa por tick vivido
+        { "BallTouchGround",      new BallTouchGroundPenalty(-10.0f),        0.01f }, // Penalidade brusca ao tocar a bola no chão
+        { "VelocityBallToGoal",   new VelocityBallToGoalReward(false),       0.8f },
+        { "Goal",                 new ZeroSumReward(new GoalReward(), 1.0f, 1.0f), 100.0f },
+        { "TouchBallAerial",      new TouchBallAerialReward(),               3.0f }, // 3x built-in aerial multiplier → ground=3, aéreo=9
+        { "AirAlignment",         new AirAlignmentReward(),                  0.4f }, // trajetória eficiente até à bola
+        { "AerialDistance",       new AerialDistanceReward(),                0.4f }, // altura do contacto
+        { "Air",                  new AirReward(),                           0.05f },
     };
 
+    std::vector<WeightedReward> rewards;
+    std::vector<std::string> rewardNames;
+    for (auto& nr : namedRewards) {
+        rewards.push_back({ nr.reward, nr.weight });
+        rewardNames.push_back(nr.name);
+    }
+    RegisterRewardNames(rewardNames); // regista uma vez (call_once); o Scheduler usa para o matching
+
+
+
 	std::vector<TerminalCondition*> terminalConditions = {
-		new NoTouchCondition(4),
+		new NoTouchCondition(2),
 		new GoalScoreCondition(),
 		new TimeoutCondition(60.0f) // Termina/reseta se o jogo rolar por 1 minuto (60 segs) sem golo
 	};
@@ -81,17 +91,22 @@ EnvCreateResult EnvCreateFunc(int index) {
     // Auto add a car to BLUE only, so only 1 car exists in the arena
     arena->AddCar(Team::BLUE, CAR_CONFIG_PLANK);
 
-    std::vector<std::pair<StateSetter*, float>> weightedSetters = {
-        { new AirShotState(), 1.0f },           // Foco principal em remates aéreos!
-        { new TrackedGoalShotState(), 0.0f },
-        { new TrackedRandomState(true,false,true), 0.0f },
-        { new KickoffState(), 0.0f },
-        //{ new AttackerMidfieldState(), 0.0f },    
-    }; //state setters, kickoff and randomstate weights go tune them yourself
-    CombinedState* combinedSetter = new CombinedState(weightedSetters);
+    // SchedulableState: as labels ("AirShot", "WallDrag", ...) são o que referencias em
+    // SchedulerConfig.h (stateWeights). O Scheduler muda estes pesos por fase em runtime.
+    SchedulableState* combinedSetter = new SchedulableState({
+        { "AirShot",      new AirShotState(),                    0.0f }, // Foco principal em remates aéreos!
+        { "GoalShot",     new TrackedGoalShotState(),            0.0f },
+        { "Random",       new TrackedRandomState(true,false,true), 0.0f },
+        { "FallingBall",  new TrackedFallingBallApproachState(), 0.0f }, // Bola a cair no meio campo adversário, carro no chão
+        { "Pass",         new PassState(),                       0.0f }, // Passe: bola a meia altura com vel horizontal, carro aleatório
+        { "Kickoff",      new KickoffState(),                    0.0f },
+        { "StaticAerial", new StaticAerialState(),               0.0f },
+        { "Cross",        new CrossState(),                      0.0f },
+        { "WallDrag",     new WallDragState(),                   1.0f },
+    }, /*stochastic*/ true); // pesos iniciais; o Scheduler sobrepõe-se conforme a fase
 
     // Padded observation builder for up to 3 players per team, if your just training 1v1, just use advanced obs and only train ones, just remove the state setter
-    auto obsBuilder = new DefaultObsPadded(3);
+    auto obsBuilder = new DefaultObsPadded(1);
     auto actionParser = new DefaultAction();
 
     EnvCreateResult result = {};
@@ -105,20 +120,17 @@ EnvCreateResult EnvCreateFunc(int index) {
     return result;
 }
 
-extern std::atomic<int> g_totalGoals;
+Scheduler g_scheduler;
 
 void StepCallback(Learner* learner, const std::vector<GameState>& states, Report& report) {
 
+    g_scheduler.Update(learner, report); // 1x por iteração: recolhe stats, avança fase se necessário
+
     bool doExpensiveMetrics = (rand() % 4) == 0;
+
     for (auto& state : states) {
-        if (state.goalScored) {
-            if (IsArenaGoalShot(state.lastArena)) {
-
-                g_totalGoals++;
-
-            }
-
-        }
+        if (state.goalScored)
+            g_scheduler.OnGoalScored(state.lastArena);
 
         if (doExpensiveMetrics) {
             for (auto& player : state.players) {
@@ -136,26 +148,26 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
         if (state.goalScored)
             report.AddAvg("Game/Goal Speed", state.ball.vel.Length());
     }
-} //them metrics, I dont use metrics tho
+}
 
 int main(int argc, char* argv[]) {
-    RocketSim::Init("/home/bugss/Desktop/Robotica/collision_meshes"); //INCLUDE YOUR COLLISION MESHES
+    RocketSim::Init(CONFIG_COLLISION_MESHES);
 
     LearnerConfig cfg = {};
     cfg.deviceType = LearnerDeviceType::GPU_CUDA;
     cfg.tickSkip = 8; //tick skip, if you change this you should change gamma
     cfg.actionDelay = cfg.tickSkip - 1;
-    cfg.numGames =350; //adjust to how good your cpu is, mine is a i7-12700k and 192 games is optimal for me. The better your cpu is, the more games you should have.
+    cfg.numGames = 576; // inference ≈ env_step: ajustar com formula numGames*(envStep/inferenceTime)
 
-    cfg.ppo.tsPerItr = 196608;  
-    cfg.ppo.batchSize = 196608; //how much your bot trains at a time
-    cfg.ppo.miniBatchSize = 98304; //minibatch size. if you have small pc, 25k is good, if you have a powerful pc (4070ti or better) 75k might be optimal
-    cfg.ppo.epochs = 1; //start out with one epoch, and once your bot gets better increase this to two
+    cfg.ppo.tsPerItr = 262144;
+    cfg.ppo.batchSize = 262144;
+    cfg.ppo.miniBatchSize = 131072; // 262144 / 131072 = 2 — divisivel; 9070 XT tem 16GB VRAM
+    cfg.ppo.epochs = 1; // usa cada batch de dados duas vezes — mais aprendizagem por iteracao
     cfg.ppo.entropyScale = 0.035f; //this is a good starting point, lower it if your bot is like very good, or you just want to refine what it already knows                              
     cfg.ppo.gaeGamma = 0.99f; //start with .99, then up to .993 once it can hit ball and shoot ball on net, then .995 once it learns dribbles and powershots, .997 once it gets better than necto.
     cfg.ppo.policyLR = 2e-4f;
     cfg.ppo.criticLR = 2e-4f; //learning rates. start out high, then lower to 1.5e-4 when it learns to shoot and touch ball, then 1e-4 once it learns dribbles, then 0.8e-4 once it is around nexto level.
-    cfg.ppo.sharedHead.layerSizes = { 1024, 1024, 1024}; //your bot has a shared head, both the cpu and critic learn from this, this should be big sizes
+    cfg.ppo.sharedHead.layerSizes = { 1024,1024, 512, 512 }; // power-of-2 → kernels GPU ideais; 768 = 3×256, desalinhado, throughput pior
     cfg.ppo.policy.layerSizes = { 256, 256, 256 };
     cfg.ppo.critic.layerSizes = { 256, 256, 256 }; //these are pretty good, DO NOT INCREASE IT FURTHER
 
@@ -166,6 +178,8 @@ int main(int argc, char* argv[]) {
     cfg.ppo.sharedHead.addLayerNorm = true; // if you decide not to use sharedhead(why would you not?) set this to false
     cfg.ppo.policy.addLayerNorm = true; // dont touch
     cfg.ppo.critic.addLayerNorm = true; // dont touch
+
+    cfg.ppo.useHalfPrecision = true; // FP16 inference — 9070 XT (RDNA4) tem 2x throughput em FP16 vs FP32, treino continua em FP32
 
     cfg.skillTracker.enabled = false; // Desativado para parar os test matches
     cfg.skillTracker.numArenas = 8;

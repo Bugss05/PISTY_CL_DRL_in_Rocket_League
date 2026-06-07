@@ -50,6 +50,13 @@ namespace GGL {
 		void SaveStats(std::filesystem::path path);
 		void LoadStats(std::filesystem::path path);
 
+		// --- Controlo de hiperparâmetros em runtime (usado pelo Scheduler/currículo) ---
+		// Pontes torch-free para o PPOLearner privado. Não recriam modelos nem optimizer:
+		// SetLearningRates ajusta o LR dos param_groups in-place (preserva pesos e estado do
+		// Adam) e GetLivePPOConfig() devolve o config vivo que o Learn() lê a cada iteração.
+		void SetLearningRates(float policyLR, float criticLR);
+		PPOLearnerConfig& GetLivePPOConfig();
+
 		RG_NO_COPY(Learner);
 
 		~Learner();
