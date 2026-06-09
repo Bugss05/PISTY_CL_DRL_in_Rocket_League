@@ -4,6 +4,7 @@
 #include "SchedulerConfig.h"
 #include "SchedulerCore.h"
 #include "SchedulableState.h"
+#include "SchedulableTerminal.h"
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -47,8 +48,18 @@ public:
 	// Chamado em StepCallback quando state.goalScored == true.
 	void OnGoalScored(RocketSim::Arena* arena);
 
+	// Chamado em StepCallback quando qualquer jogador toca na bola (e goal não foi marcado).
+	// Conta como vitória se o terminal "BallTouch" estiver ativo nessa arena.
+	void OnBallTouched(RocketSim::Arena* arena);
+
 private:
-	static constexpr int MIN_EPISODES_FOR_CHECK = 30; // episódios mínimos para contar um estado
+	static constexpr int MIN_EPISODES_FOR_CHECK = 30;
+
+	struct StateStats {
+		std::unordered_map<std::string, int>   episodes;
+		std::unordered_map<std::string, int>   goals;
+		std::unordered_map<std::string, float> winRate;
+	}; // episódios mínimos para contar um estado
 
 	SchedulerConfig cfg;
 	std::vector<ResolvedPPO> resolved;
@@ -60,16 +71,16 @@ private:
 	float   lastPolicyLR     = -1.0f;
 	float   lastCriticLR     = -1.0f;
 
-	std::unordered_map<RocketSim::Arena*, SchedulableState*> arenaToState;
+	std::unordered_map<RocketSim::Arena*, SchedulableState*>    arenaToState;
+	std::unordered_map<RocketSim::Arena*, SchedulableTerminal*> arenaToTerminal;
 
 	// Logging
 	std::ofstream logFile;
 	std::chrono::system_clock::time_point trainStart;
 
 	void  Initialize(GGL::Learner* learner);
-	std::unordered_map<std::string, float> CollectPerStateWinRate(
-		GGL::Learner* learner, GGL::Report& report);
-	bool  ShouldAdvance(const std::unordered_map<std::string, float>& perStateWR, uint64_t ts);
+	StateStats CollectPerStateStats(GGL::Learner* learner, GGL::Report& report);
+	bool  ShouldAdvance(const StateStats& stats, uint64_t ts);
 	void  ApplyPhase(GGL::Learner* learner, int phaseIdx);
 	void  ApplyPhaseWeights(GGL::Learner* learner, const TrainingPhase& p);
 	void  ApplyPPO(GGL::Learner* learner, uint64_t ts, int phaseIdx);

@@ -124,9 +124,16 @@ void Scheduler::LogPhaseEvent(const std::string& event, int phaseIdx,
 // ---------------------------------------------------------------------------
 void Scheduler::Initialize(Learner* learner) {
 	for (int i = 0; i < (int)learner->envSet->arenas.size(); i++) {
+		Arena* arena = learner->envSet->arenas[i];
+
 		auto* ss = dynamic_cast<SchedulableState*>(learner->envSet->stateSetters[i]);
 		if (ss)
-			arenaToState[learner->envSet->arenas[i]] = ss;
+			arenaToState[arena] = ss;
+
+		for (auto* tc : learner->envSet->terminalConditions[i]) {
+			auto* st = dynamic_cast<SchedulableTerminal*>(tc);
+			if (st) { arenaToTerminal[arena] = st; break; }
+		}
 	}
 
 	ResolveBaseline(learner);
@@ -145,7 +152,7 @@ void Scheduler::Initialize(Learner* learner) {
 }
 
 // ---------------------------------------------------------------------------
-// OnGoalScored — chamado de StepCallback
+// OnGoalScored / OnBallTouched — chamados de StepCallback
 // ---------------------------------------------------------------------------
 void Scheduler::OnGoalScored(RocketSim::Arena* arena) {
 	auto it = arenaToState.find(arena);
@@ -153,41 +160,47 @@ void Scheduler::OnGoalScored(RocketSim::Arena* arena) {
 		it->second->NotifyGoal();
 }
 
+void Scheduler::OnBallTouched(RocketSim::Arena* arena) {
+	// Só conta como vitória se o terminal "BallTouch" estiver ativo nessa arena
+	auto termIt = arenaToTerminal.find(arena);
+	if (termIt == arenaToTerminal.end()) return;
+	if (!termIt->second->IsConditionActive("BallTouch")) return;
+
+	auto stateIt = arenaToState.find(arena);
+	if (stateIt != arenaToState.end())
+		stateIt->second->NotifyGoal();
+}
+
 // ---------------------------------------------------------------------------
-// CollectPerStateWinRate — agrega de TODAS as arenas, adiciona ao Report
+// CollectPerStateStats — agrega de TODAS as arenas, adiciona ao Report
 // ---------------------------------------------------------------------------
-std::unordered_map<std::string, float>
-Scheduler::CollectPerStateWinRate(Learner* learner, Report& report) {
-	// Agrega episódios e golos por nome de state setter
-	std::unordered_map<std::string, int> totalEps, totalGoals;
+Scheduler::StateStats
+Scheduler::CollectPerStateStats(Learner* learner, Report& report) {
+	StateStats out;
 	for (auto* setter : learner->envSet->stateSetters) {
 		auto* ss = dynamic_cast<SchedulableState*>(setter);
 		if (!ss) continue;
 		auto stats = ss->GetAndResetStats();
 		for (int i = 0; i < (int)stats.names.size(); i++) {
-			totalEps[stats.names[i]]   += stats.episodes[i];
-			totalGoals[stats.names[i]] += stats.goals[i];
+			out.episodes[stats.names[i]] += stats.episodes[i];
+			out.goals[stats.names[i]]    += stats.goals[i];
 		}
 	}
 
-	// Calcula win rate por estado e adiciona ao report (wandb)
-	std::unordered_map<std::string, float> perStateWR;
-	for (auto& [name, eps] : totalEps) {
-		if (eps < MIN_EPISODES_FOR_CHECK) continue; // poucos dados — ignora
-		float wr = (float)totalGoals[name] / eps;
-		perStateWR[name] = wr;
-		// Envia para wandb via report
+	for (auto& [name, eps] : out.episodes) {
+		if (eps < MIN_EPISODES_FOR_CHECK) continue;
+		float wr = (float)out.goals[name] / eps;
+		out.winRate[name] = wr;
 		report.Add("WinRate/" + name, wr);
 	}
 
-	return perStateWR;
+	return out;
 }
 
 // ---------------------------------------------------------------------------
 // ShouldAdvance — verifica se TODOS os estados ativos passaram o limiar
 // ---------------------------------------------------------------------------
-bool Scheduler::ShouldAdvance(const std::unordered_map<std::string, float>& perStateWR,
-                               uint64_t ts) {
+bool Scheduler::ShouldAdvance(const StateStats& stats, uint64_t ts) {
 	if (currentPhaseIdx >= (int)cfg.phases.size() - 1)
 		return false;
 
@@ -207,31 +220,34 @@ bool Scheduler::ShouldAdvance(const std::unordered_map<std::string, float>& perS
 	float threshold = *p.advanceWinRate;
 	int   needed    = p.advanceItersNeeded.value_or(5);
 
-	// Determina quais estados são "ativos" (peso > 0) na fase atual
-	// Usa stateWeights do config (não o peso atual em runtime, que pode ter sido alterado)
-	bool allAbove = true;
+	bool allAbove   = true;
 	bool anyChecked = false;
 
-	printf("[Scheduler]   %-16s  %6s  %6s  %s\n", "Estado", "EPs", "WinRate", "OK?");
-	printf("[Scheduler]   %-16s  %6s  %6s  %s\n",
-		"------", "------", "-------", "---");
+	printf("[Scheduler]   %-18s  %6s  %6s  %7s  %s\n",
+		"Estado", "EPs", "Wins", "WinRate", "OK?");
+	printf("[Scheduler]   %-18s  %6s  %6s  %7s  %s\n",
+		"------", "---", "----", "-------", "---");
 
 	for (auto& [name, weight] : p.stateWeights) {
-		if (weight <= 0.0f) continue; // não ativo nesta fase
+		if (weight <= 0.0f) continue;
 
-		auto it = perStateWR.find(name);
-		if (it == perStateWR.end()) {
-			// Estado ativo mas sem episódios suficientes — não contabiliza
-			printf("[Scheduler]   %-16s  %6s  %6s  (poucos dados)\n",
-				name.c_str(), "-", "-");
+		auto epsIt = stats.episodes.find(name);
+		int  eps   = (epsIt != stats.episodes.end()) ? epsIt->second : 0;
+		int  wins  = 0;
+		auto gIt   = stats.goals.find(name);
+		if (gIt != stats.goals.end()) wins = gIt->second;
+
+		if (eps < MIN_EPISODES_FOR_CHECK) {
+			printf("[Scheduler]   %-18s  %6d  %6s  %7s  (poucos dados)\n",
+				name.c_str(), eps, "-", "-");
 			continue;
 		}
 
 		anyChecked = true;
-		float wr = it->second;
-		bool ok = (wr >= threshold);
-		printf("[Scheduler]   %-16s  %6.1f%%  %s\n",
-			name.c_str(), wr * 100.f, ok ? "OK" : "NOK");
+		float wr = stats.winRate.at(name);
+		bool  ok = (wr >= threshold);
+		printf("[Scheduler]   %-18s  %6d  %6d  %6.1f%%  %s\n",
+			name.c_str(), eps, wins, wr * 100.f, ok ? "OK" : "NOK");
 		if (!ok) allAbove = false;
 	}
 
@@ -278,6 +294,15 @@ void Scheduler::ApplyPhaseWeights(Learner* learner, const TrainingPhase& p) {
 			ss->SetStochastic(*p.stochastic);
 		if (!p.stateWeights.empty())
 			ss->SetWeights(p.stateWeights);
+	}
+
+	if (!p.terminalActive.empty()) {
+		for (auto& [arena, st] : arenaToTerminal)
+			st->SetActive(p.terminalActive);
+
+		printf("[Scheduler]   Terminal conditions atualizadas:\n");
+		for (auto& [name, active] : p.terminalActive)
+			printf("[Scheduler]     %-16s -> %s\n", name.c_str(), active ? "ON" : "OFF");
 	}
 }
 
@@ -351,11 +376,11 @@ void Scheduler::Update(Learner* learner, Report& report) {
 		cfg.phases[currentPhaseIdx].name.c_str(),
 		(unsigned long long)ts);
 
-	// 1. Recolhe win rate por estado (e adiciona ao report para wandb)
-	auto perStateWR = CollectPerStateWinRate(learner, report);
+	// 1. Recolhe stats por estado (e adiciona ao report para wandb)
+	auto stats = CollectPerStateStats(learner, report);
 
 	// 2. Verifica se avança de fase
-	if (ShouldAdvance(perStateWR, ts)) {
+	if (ShouldAdvance(stats, ts)) {
 		currentPhaseIdx++;
 		consecutiveIters = 0;
 		printf("[Scheduler] *** AVANCA para fase %d: \"%s\" @ %llu ts ***\n",

@@ -2,6 +2,7 @@
 #include "../FrameworkTorch.h"
 #include <GigaLearnCPP/Util/Utils.h>
 #include <nlohmann/json.hpp>
+#include <cmath>
 
 namespace GGL {
 	struct WelfordStat {
@@ -45,15 +46,15 @@ namespace GGL {
 
 		nlohmann::json ToJSON() const {
 			nlohmann::json result = {};
-			result["mean"] = runningMean;
-			result["var"] = runningVariance;
+			result["mean"] = (std::isnan(runningMean) || std::isinf(runningMean)) ? 0.0 : runningMean;
+			result["var"]  = (std::isnan(runningVariance) || std::isinf(runningVariance)) ? 0.0 : runningVariance;
 			result["count"] = count;
 			return result;
 		}
 
 		void ReadFromJSON(const nlohmann::json& json) {
-			runningMean = json["mean"];
-			runningVariance = json["var"];
+			runningMean     = json["mean"].is_null() ? 0.0 : json["mean"].get<double>();
+			runningVariance = json["var"].is_null()  ? 0.0 : json["var"].get<double>();
 			count = json["count"];
 		}
 	};
@@ -112,8 +113,8 @@ namespace GGL {
 		}
 
 		void ReadFromJSON(const nlohmann::json& json) {
-			runningMeans = Utils::MakeVecFromJSON<double>(json["mean"]);
-			runningVariances = Utils::MakeVecFromJSON<double>(json["var"]);
+			runningMeans = Utils::MakeVecFromJSON<double>(json["means"]);
+			runningVariances = Utils::MakeVecFromJSON<double>(json["vars"]);
 			count = json["count"];
 		}
 	};

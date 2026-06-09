@@ -1,42 +1,9 @@
 #include "GoalShotState.h"
 #include "../Math.h"
-#include <iostream>
-
-std::atomic<int> g_totalEpisodes{0};
-std::atomic<int> g_totalGoals{0};
-std::atomic<float> g_currentRadius{1000.f};
 
 using RocketSim::Math::RandFloat;
 
 void RLGC::GoalShotState::ResetArena(Arena* arena) {
-	// Periodic check for increasing radius
-	int episodes = ++g_totalEpisodes;
-	if (episodes >= 1000) {
-		// We only want one thread to do the reset, so we check carefully
-                int actualEps = g_totalEpisodes.exchange(0);
-
-                if (actualEps >= 1000) {
-
-                        int goals = g_totalGoals.exchange(0);
-
-                        int validEps = std::max(actualEps, goals);
-
-                        float winRate = (float)goals / validEps;
-
-			
-			float radius = g_currentRadius.load();
-			if (winRate >= 0.98f) {
-				radius += 200.f;
-				if (radius > 9000.f) radius = 9000.f; // Max boundary limit roughly
-				g_currentRadius.store(radius);
-				std::cout << "\n[GoalShotState] WinRate: " << (winRate * 100.f) << "% -> Increasing radius to " << radius << "\n" << std::endl;
-			} else {
-				std::cout << "\n[GoalShotState] WinRate: " << (winRate * 100.f) << "% -> Radius remains " << radius << "\n" << std::endl;
-			}
-		}
-	}
-
-	// Reset boost pads and everything
 	arena->ResetToRandomKickoff();
 
 	float ballX = RandFloat(-890.f, 890.f);
@@ -50,11 +17,9 @@ void RLGC::GoalShotState::ResetArena(Arena* arena) {
 		arena->ball->SetState(bs);
 	}
 
-	float radius = g_currentRadius.load();
-
-	for (Car* car : arena->_cars) { 
+	for (Car* car : arena->_cars) {
 		CarState cs = {};
-		
+
 		float theta = RandFloat(0.f, M_PI);
 		float carX = ballX + radius * cosf(theta);
 		float carY = ballY - radius * sinf(theta);

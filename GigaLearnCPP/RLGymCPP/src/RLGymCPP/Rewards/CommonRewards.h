@@ -65,8 +65,11 @@ namespace RLGC {
 				targetOrangeGoal = !targetOrangeGoal;
 
 			Vec targetPos = targetOrangeGoal ? CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
-			
-			Vec ballDirToGoal = (targetPos - state.ball.pos).Normalized();
+
+			Vec ballToGoal = targetPos - state.ball.pos;
+			float dist = ballToGoal.Length();
+			if (dist < 1e-6f) return 0.0f;
+			Vec ballDirToGoal = ballToGoal / dist;
 			return ballDirToGoal.Dot(state.ball.vel / CommonValues::BALL_MAX_SPEED);
 		}
 	};
@@ -75,7 +78,10 @@ namespace RLGC {
 	class VelocityPlayerToBallReward : public Reward {
 	public:
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) {
-			Vec dirToBall = (state.ball.pos - player.pos).Normalized();
+			Vec diff = state.ball.pos - player.pos;
+			float dist = diff.Length();
+			if (dist < 1e-6f) return 0.0f;
+			Vec dirToBall = diff / dist;
 			Vec normVel = player.vel / CommonValues::CAR_MAX_SPEED;
 			return dirToBall.Dot(normVel);
 		}
@@ -85,7 +91,10 @@ namespace RLGC {
 	class FaceBallReward : public Reward {
 	public:
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) {
-			Vec dirToBall = (state.ball.pos - player.pos).Normalized();
+			Vec diff = state.ball.pos - player.pos;
+			float dist = diff.Length();
+			if (dist < 1e-6f) return 0.0f;
+			Vec dirToBall = diff / dist;
 			return player.rotMat.forward.Dot(dirToBall);
 		}
 	};
@@ -238,8 +247,10 @@ namespace RLGC {
 			// Get the angle between the player->ball and player->goal vectors. The smaller the angle, the better
 			Vec playerToBall = state.ball.pos - player.pos;
 			Vec playerToGoal = targetPos - player.pos;
+			if (playerToBall.Length() < 1e-6f || playerToGoal.Length() < 1e-6f) return 0.0f;
 
-			float angle = acosf(playerToBall.Normalized().Dot(playerToGoal.Normalized()));
+			float dot = RS_CLAMP(playerToBall.Normalized().Dot(playerToGoal.Normalized()), -1.0f, 1.0f);
+			float angle = acosf(dot);
 
 			// Reward is 1 when the ball is perfectly between the player and the goal, and approaches 0 as the angle increases, reaching 0 at 180 degrees
 			// Returns: [0, 1]
@@ -350,8 +361,10 @@ namespace RLGC {
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
 			if (player.isOnGround || player.vel.Length() < 100.0f) return 0.0f;
 
-			Vec dirToBall = (state.ball.pos - player.pos).Normalized();
-			Vec velDir = player.vel.Normalized();
+			Vec diffToBall = state.ball.pos - player.pos;
+			if (diffToBall.Length() < 1e-6f) return 0.0f;
+			Vec dirToBall = diffToBall / diffToBall.Length();
+			Vec velDir = player.vel / player.vel.Length();
 			
 			float alignment = velDir.Dot(dirToBall); // 1.0 se estiver perfeito
 			return RS_MAX(0.0f, alignment);
@@ -399,7 +412,9 @@ namespace RLGC {
 			if (player.ballTouchedStep) {
 				consecutiveAirTouches++;
 				// Exponential reward for maintaining the dribble: 1st touch = 1, 2nd = 2, 3rd = 4...
-				return powf(2.0f, (float)consecutiveAirTouches - 1.0f);
+				// Cap at 64 touches to prevent overflow to Inf (0 * Inf = NaN)
+				int capped = RS_MIN(consecutiveAirTouches, 64);
+				return powf(2.0f, (float)capped - 1.0f);
 			}
 
 			return 0.0f;
@@ -720,7 +735,7 @@ namespace RLGC {
 			}
 			float cornerBonus = RS_CLAMP(1 - (closestDist / CommonValues::GOAL_WIDTH), 0, 1);
 
-			float bonus = speedBonus * 0.25f + cornerBonus * 0.25f; // up to 0.5
+			float bonus = speedBonus * 1.0f + cornerBonus * 0.25f; // up to 0.5
 
 			baseReward += bonus;
 			// Give +bonus to scoring players, -bonus to others (zero-sum)
@@ -733,22 +748,32 @@ namespace RLGC {
 		}
 	};
 
+	// Output: [-1, 1] — +1 se se aproxima à velocidade máxima, -1 se se afasta à velocidade máxima.
 	class AirCloserToBallReward : public Reward {
 	public:
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-
-			if (state.ball.pos.z < 350.0f) return 0.0f; // Only reward when the ball is in the air
+			if (state.ball.pos.z < 350.0f) return 0.0f;
 			if (player.isOnGround) return 0.0f;
 			if (!state.prev) return 0.0f;
 
 			float prevDist = (state.prev->ball.pos - player.prev->pos).Length();
 			float currentDist = (state.ball.pos - player.pos).Length();
+			float maxChange = CommonValues::CAR_MAX_SPEED * state.deltaTime;
+			if (maxChange < 1e-6f) return 0.0f;
+			return RS_CLAMP((prevDist - currentDist) / maxChange, -1.0f, 1.0f);
+		}
+	};
 
-			// Reward is positive if we got closer to the ball, negative if we got farther, and scaled by the change in distance
-			return prevDist - currentDist;
+	// Recompensa tocar na bola com scale pela velocidade do jogador no momento do toque.
+	// Incentiva o bot a rematar com força em vez de "encostar" a bola devagar.
+	// Output: [0, 1] — 0 se não tocou, velocidade_jogador/CAR_MAX_SPEED se tocou.
+	class VelocityTouchReward : public Reward {
+	public:
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			if (!player.ballTouchedStep) return 0.0f;
+			return player.vel.Length() / CommonValues::CAR_MAX_SPEED;
 		}
 	};
 
 
-}
 }

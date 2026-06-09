@@ -24,8 +24,9 @@ Just replace this with your original examplemain.cpp file in your GigalearnCPP-L
 #include <RLGymCPP/ActionParsers/DefaultAction.h>
 #include <RLGymCPP/StateSetters/WallDragState.h>
 //include all of our directories to compile the Gigalearnbot.exe
-#include "TrackedStates.h"
 #include "SchedulableState.h"
+#include "SchedulableTerminal.h"
+#include "BallTouchCondition.h"
 #include "Scheduler.h"
 
 
@@ -51,15 +52,61 @@ EnvCreateResult EnvCreateFunc(int index) {
     // arenas, por isso o Scheduler casa nome->índice de forma robusta (ver g_rewardNames).
     struct NamedReward { std::string name; Reward* reward; float weight; };
     std::vector<NamedReward> namedRewards = {
-        { "VelocityPlayerToBall", new VelocityPlayerToBallReward(),          0.5f },
-        { "ConstantPenalty",      new ConstantReward(),                     -0.3f }, // Penalidade constante fixa por tick vivido
-        { "BallTouchGround",      new BallTouchGroundPenalty(-10.0f),        0.01f }, // Penalidade brusca ao tocar a bola no chão
-        { "VelocityBallToGoal",   new VelocityBallToGoalReward(false),       0.8f },
-        { "Goal",                 new ZeroSumReward(new GoalReward(), 1.0f, 1.0f), 100.0f },
-        { "TouchBallAerial",      new TouchBallAerialReward(),               3.0f }, // 3x built-in aerial multiplier → ground=3, aéreo=9
-        { "AirAlignment",         new AirAlignmentReward(),                  0.4f }, // trajetória eficiente até à bola
-        { "AerialDistance",       new AerialDistanceReward(),                0.4f }, // altura do contacto
-        { "Air",                  new AirReward(),                           0.05f },
+        // --- Golo / Bola ---
+        { "Goal",                    new ZeroSumReward(new GoalReward(), 1.0f, 1.0f),0.0f },
+        { "GoalBonus",               new ZeroSumReward(new GoalBonusReward(), 1.0f, 1.0f), 0.0f}, // bónus por velocidade + canto
+        { "VelocityBallToGoal",      new VelocityBallToGoalReward(false),      0.0f },
+        //{ "GoalDistancePotential",   new GoalDistancePotentialReward(),        0.0f }, // reward shaping por aproximação da bola ao golo
+        //{ "ShotHitsTargetInGoal",    new ShotHitsTargetinGoalReward(),         0.0f }, // bónus ao marcar perto dos cantos
+        //{ "PlayerGoal",              new PlayerGoalReward(),                   0.0f }, // só ao último jogador a tocar antes do golo
+        //{ "Assist",                  new AssistReward(),                       0.0f },
+        //{ "Shot",                    new ShotReward(),                         0.0f },
+        //{ "ShotPass",                new ShotPassReward(),                     0.0f },
+        //{ "Save",                    new SaveReward(),                         0.0f },
+        //{ "SaveGoal",                new SaveGoalReward(),                     0.0f }, // deflexão que evita golo
+
+        // --- Aproximação ao alvo ---
+        { "VelocityPlayerToBall",    new VelocityPlayerToBallReward(),         0.0f },
+        //{ "VeloAlignment",           new VeloAlignmentReward(),                0.0f }, // projeção escalar da vel na direção da bola
+        { "FaceBall",                new FaceBallReward(),                     0.0f },
+        //{ "BallBetweenPlayerGoal",   new BallBetweenPlayerAndGoalReward(),     0.0f }, // posicionamento p/ rematar
+
+        // --- Toque / Força ---
+        { "TouchBallAerial",         new TouchBallAerialReward(),              0.0f },
+        { "VelocityTouch",           new VelocityTouchReward(),                0.0f }, // toque com scale pela velocidade do jogador [0,1]
+        { "TouchAccel",              new TouchAccelReward(),                   0.0f }, // acelera bola até 110 km/h
+        { "StrongTouch",             new StrongTouchReward(),                  0.0f }, // toque forte (20–130 km/h)
+        //{ "FlipReset",               new FlipResetReward(),                    0.0f }, // toque invertido no ar
+
+        // --- Aéreo ---
+        { "AirAlignment",            new AirAlignmentReward(),                 0.0f },
+        { "AerialDistance",          new AerialDistanceReward(),               0.0f },
+        { "AirCloserToBall",         new AirCloserToBallReward(),              0.0f }, // aproximação aérea à bola
+        { "HeightMatch",             new HeightMatchReward(),                  0.0f }, // igualar altura da bola
+        //{ "AirDribble",              new AirDribbleReward(),                   0.0f }, // toques consecutivos no ar
+        { "WallLaunch",              new WallLaunchReward(),                   0.0f }, // salto da parede lateral
+        { "Air",                     new AirReward(),                          0.0f },
+
+        // --- Velocidade / Boost ---
+        { "Speed",                   new SpeedReward(),                        0.0f },
+        { "Velocity",                new VelocityReward(),                     0.0f },
+        //{ "SaveBoost",               new SaveBoostReward(),                    0.0f },
+        //{ "PickupBoost",             new PickupBoostReward(),                  0.0f },
+        { "Wavedash",                new WavedashReward(),                     0.0f },
+        { "LandAllFours",            new LandAllFoursReward(),                 0.0f }, // aterrar nas 4 rodas
+
+        // --- Bump / Demo ---
+        //{ "Bump",                    new BumpReward(),                         0.0f },
+        //{ "BumpedPenalty",           new BumpedPenalty(),                      0.0f },
+        //{ "Demo",                    new DemoReward(),                         0.0f },
+        //{ "DemoedPenalty",           new DemoedPenalty(),                      0.0f },
+
+        // --- Penalidades ---
+        { "ConstantPenalty",         new ConstantReward(),                    -0.0f },
+        //{ "BallTouchGround",         new BallTouchGroundPenalty(-10.0f),       0.00f },
+        //{ "CmonDoSomething",         new CmonDoSomethingReward(),              0.0f }, // penaliza inatividade (quadrática)
+        //{ "TeremMoffi",              new TeremMoffiReward(),                   0.0f }, // penaliza demora a marcar (log)
+        //{ "ActionSmoothing",         new ActionSmoothingPenalty(),             0.0f }, // penaliza inputs bruscos
     };
 
     std::vector<WeightedReward> rewards;
@@ -72,11 +119,14 @@ EnvCreateResult EnvCreateFunc(int index) {
 
 
 
-	std::vector<TerminalCondition*> terminalConditions = {
-		new NoTouchCondition(2),
-		new GoalScoreCondition(),
-		new TimeoutCondition(60.0f) // Termina/reseta se o jogo rolar por 1 minuto (60 segs) sem golo
-	};
+	// As labels ("NoTouch", "GoalScore", "Timeout") são o que referencias em
+	// SchedulerConfig.h (terminalActive). O Scheduler ativa/desativa por fase.
+	SchedulableTerminal* terminalSet = new SchedulableTerminal({
+		{ "NoTouch",   new NoTouchCondition(15),    true },
+		{ "GoalScore", new GoalScoreCondition(),   true },
+		{ "BallTouch", new BallTouchCondition(),   false }, // ativar por fase: .terminalActive = { {"BallTouch", true} }
+		{ "Timeout",   new TimeoutCondition(40.f), true },
+	});
 
 
     // Just 1 player training the shot
@@ -95,14 +145,14 @@ EnvCreateResult EnvCreateFunc(int index) {
     // SchedulerConfig.h (stateWeights). O Scheduler muda estes pesos por fase em runtime.
     SchedulableState* combinedSetter = new SchedulableState({
         { "AirShot",      new AirShotState(),                    0.0f }, // Foco principal em remates aéreos!
-        { "GoalShot",     new TrackedGoalShotState(),            0.0f },
-        { "Random",       new TrackedRandomState(true,false,true), 0.0f },
-        { "FallingBall",  new TrackedFallingBallApproachState(), 0.0f }, // Bola a cair no meio campo adversário, carro no chão
+        { "GoalShot",     new GoalShotState(1600),               0.0f },
+        { "Random",       new RandomState(true,false,true),      0.0f },
+        { "FallingBall",  new FallingBallApproachState(),        0.4f }, // Bola a cair no meio campo adversário, carro no chão
         { "Pass",         new PassState(),                       0.0f }, // Passe: bola a meia altura com vel horizontal, carro aleatório
         { "Kickoff",      new KickoffState(),                    0.0f },
         { "StaticAerial", new StaticAerialState(),               0.0f },
         { "Cross",        new CrossState(),                      0.0f },
-        { "WallDrag",     new WallDragState(),                   1.0f },
+        { "WallDrag",     new WallDragState(),                   0.0f },
     }, /*stochastic*/ true); // pesos iniciais; o Scheduler sobrepõe-se conforme a fase
 
     // Padded observation builder for up to 3 players per team, if your just training 1v1, just use advanced obs and only train ones, just remove the state setter
@@ -113,7 +163,7 @@ EnvCreateResult EnvCreateFunc(int index) {
     result.actionParser = actionParser;
     result.obsBuilder = obsBuilder;
     result.stateSetter = combinedSetter;
-    result.terminalConditions = terminalConditions;
+    result.terminalConditions = { terminalSet };
     result.rewards = rewards;
     result.arena = arena;
 
@@ -129,8 +179,16 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
     bool doExpensiveMetrics = (rand() % 4) == 0;
 
     for (auto& state : states) {
-        if (state.goalScored)
+        if (state.goalScored) {
             g_scheduler.OnGoalScored(state.lastArena);
+        } else {
+            for (auto& player : state.players) {
+                if (player.ballTouchedStep) {
+                    g_scheduler.OnBallTouched(state.lastArena);
+                    break;
+                }
+            }
+        }
 
         if (doExpensiveMetrics) {
             for (auto& player : state.players) {
@@ -167,7 +225,7 @@ int main(int argc, char* argv[]) {
     cfg.ppo.gaeGamma = 0.99f; //start with .99, then up to .993 once it can hit ball and shoot ball on net, then .995 once it learns dribbles and powershots, .997 once it gets better than necto.
     cfg.ppo.policyLR = 2e-4f;
     cfg.ppo.criticLR = 2e-4f; //learning rates. start out high, then lower to 1.5e-4 when it learns to shoot and touch ball, then 1e-4 once it learns dribbles, then 0.8e-4 once it is around nexto level.
-    cfg.ppo.sharedHead.layerSizes = { 1024,1024, 512, 512 }; // power-of-2 → kernels GPU ideais; 768 = 3×256, desalinhado, throughput pior
+    cfg.ppo.sharedHead.layerSizes = { 1024, 1024, 1024 }; // power-of-2 → kernels GPU ideais; 768 = 3×256, desalinhado, throughput pior
     cfg.ppo.policy.layerSizes = { 256, 256, 256 };
     cfg.ppo.critic.layerSizes = { 256, 256, 256 }; //these are pretty good, DO NOT INCREASE IT FURTHER
 

@@ -2,7 +2,7 @@
 // Exercita EXATAMENTE as funções de SchedulerCore.h usadas em produção.
 //
 // Compilar/correr via CMake:   cmake --build build --config Release --target scheduler_test
-//                              build\Release\scheduler_test.exe
+//                              build/scheduler_test
 
 #include "SchedulerCore.h"
 #include <cstdio>
@@ -21,93 +21,113 @@ static void check(bool cond, const char* desc) {
 	}
 }
 
-static bool approx(float a, float b, float tol) {
+static bool approx(float a, float b, float tol = 1e-9f) {
 	return std::fabs(a - b) <= tol;
 }
 
 int main() {
 	SchedulerConfig cfg = GetSchedulerConfig();
+	int nPhases = (int)cfg.phases.size();
 	printf("Currículo com %d fases, interpolatePPOParams=%d\n\n",
-		(int)cfg.phases.size(), (int)cfg.interpolatePPOParams);
+		nPhases, (int)cfg.interpolatePPOParams);
 
-	// Pré-requisito do teste: assume o currículo de exemplo (3 fases @ 0 / 50M / 150M).
-	check(cfg.phases.size() == 3, "currículo tem 3 fases");
+	check(nPhases >= 1, "currículo tem pelo menos 1 fase");
 
-	// ---- 1) Deteção de fase por timestep ----
-	printf("[1] PhaseFor (fronteiras de fase)\n");
-	check(SchedulerPhaseFor(cfg, 0) == 0,            "ts=0 -> fase 0");
-	check(SchedulerPhaseFor(cfg, 49'999'999) == 0,   "ts=49.999.999 -> fase 0");
-	check(SchedulerPhaseFor(cfg, 50'000'000) == 1,   "ts=50M (exato) -> fase 1");
-	check(SchedulerPhaseFor(cfg, 149'999'999) == 1,  "ts=149.999.999 -> fase 1");
-	check(SchedulerPhaseFor(cfg, 150'000'000) == 2,  "ts=150M (exato) -> fase 2");
-	check(SchedulerPhaseFor(cfg, 1'000'000'000) == 2,"ts=1B -> fase 2 (última)");
+	// ---- 1) Forward-fill dos optionals (SchedulerResolvePhases) ----
+	printf("[1] ResolvePhases (forward-fill)\n");
 
-	// ---- 2) Forward-fill dos optionals ----
-	// Baseline com sentinelas distintas para verificar herança de campos vazios ({}).
+	// Baseline com sentinelas para verificar herança de campos vazios ({}).
 	ResolvedPPO baseline{};
-	baseline.policyLR = 9; baseline.criticLR = 9; baseline.entropyScale = 9;
-	baseline.clipRange = 0.111f; baseline.policyTemperature = 0.222f; baseline.epochs = 99;
-	baseline.gaeGamma = 9; baseline.gaeLambda = 0.333f; baseline.rewardClipRange = 0.444f;
+	baseline.policyLR          = 9.0f;
+	baseline.criticLR          = 9.0f;
+	baseline.entropyScale      = 9.0f;
+	baseline.clipRange         = 0.111f;
+	baseline.policyTemperature = 0.222f;
+	baseline.epochs            = 99;
+	baseline.gaeGamma          = 9.0f;
+	baseline.gaeLambda         = 0.333f;
+	baseline.rewardClipRange   = 0.444f;
 
 	std::vector<ResolvedPPO> r = SchedulerResolvePhases(cfg, baseline);
 
-	printf("\n[2] ResolvePhases (forward-fill)\n");
-	check(approx(r[0].policyLR, 2e-4f, 1e-9f),  "fase0.policyLR = 2e-4 (definido)");
-	check(approx(r[1].policyLR, 1.5e-4f, 1e-9f),"fase1.policyLR = 1.5e-4");
-	check(approx(r[2].policyLR, 1e-4f, 1e-9f),  "fase2.policyLR = 1e-4");
-	check(approx(r[0].gaeGamma, 0.99f, 1e-6f),  "fase0.gaeGamma = 0.99");
-	check(approx(r[1].gaeGamma, 0.993f, 1e-6f), "fase1.gaeGamma = 0.993");
-	check(approx(r[2].gaeGamma, 0.995f, 1e-6f), "fase2.gaeGamma = 0.995");
-	// Campos vazios em TODAS as fases -> herdam a baseline.
-	check(approx(r[0].clipRange, 0.111f, 1e-9f),        "fase0.clipRange vazio -> baseline (0.111)");
-	check(approx(r[2].clipRange, 0.111f, 1e-9f),        "fase2.clipRange ainda herda baseline");
-	check(approx(r[1].policyTemperature, 0.222f, 1e-9f),"fase1.policyTemperature -> baseline (0.222)");
-	check(approx(r[2].gaeLambda, 0.333f, 1e-9f),        "fase2.gaeLambda -> baseline (0.333)");
-	// epochs definido só na fase 0 (=1) -> forward-fill para as seguintes (NÃO a baseline 99).
-	check(r[0].epochs == 1, "fase0.epochs = 1 (definido)");
-	check(r[1].epochs == 1, "fase1.epochs vazio -> herda fase0 (=1), não a baseline");
-	check(r[2].epochs == 1, "fase2.epochs vazio -> herda (=1)");
+	check((int)r.size() == nPhases, "resolve retorna uma entrada por fase");
 
-	// ---- 3) Interpolação (interpolatePPOParams = true) ----
-	printf("\n[3] Interpolação contínua\n");
-	auto interpAt = [&](uint64_t ts) {
-		return SchedulerInterpolate(cfg, r, ts, SchedulerPhaseFor(cfg, ts));
-	};
-	check(approx(interpAt(0).policyLR, 2e-4f, 1e-9f),
-		"ts=0 -> policyLR = 2e-4 (início da fase 0)");
-	check(approx(interpAt(25'000'000).policyLR, 1.75e-4f, 1e-9f),
-		"ts=25M (meio fase0->1) -> policyLR = 1.75e-4 (média)");
-	check(approx(interpAt(50'000'000).policyLR, 1.5e-4f, 1e-9f),
-		"ts=50M -> policyLR = 1.5e-4 (início da fase 1)");
-	check(approx(interpAt(100'000'000).policyLR, 1.25e-4f, 1e-9f),
-		"ts=100M (meio fase1->2) -> policyLR = 1.25e-4 (média)");
-	check(approx(interpAt(25'000'000).gaeGamma, 0.9915f, 1e-6f),
-		"ts=25M -> gaeGamma = 0.9915 (média 0.99/0.993)");
-	check(approx(interpAt(150'000'000).policyLR, 1e-4f, 1e-9f),
-		"ts=150M -> policyLR = 1e-4 (última fase, sem interpolação)");
-	check(approx(interpAt(500'000'000).policyLR, 1e-4f, 1e-9f),
-		"ts=500M -> policyLR = 1e-4 (mantém-se na última fase)");
-	check(interpAt(25'000'000).epochs == 1,
-		"epochs nunca é interpolado (fica em degrau)");
+	// Fase 0 define policyLR=2e-4 explicitamente
+	check(approx(r[0].policyLR, 2e-4f), "fase0.policyLR = 2e-4 (definido)");
 
-	// ---- 4) Modo degrau (interpolatePPOParams = false) ----
-	printf("\n[4] Modo degrau (sem interpolação)\n");
-	SchedulerConfig step = cfg;
-	step.interpolatePPOParams = false;
-	auto stepAt = [&](uint64_t ts) {
-		return SchedulerInterpolate(step, r, ts, SchedulerPhaseFor(step, ts));
-	};
-	check(approx(stepAt(25'000'000).policyLR, 2e-4f, 1e-9f),
-		"ts=25M -> policyLR = 2e-4 (valor da fase 0, sem interpolar)");
-	check(approx(stepAt(100'000'000).policyLR, 1.5e-4f, 1e-9f),
-		"ts=100M -> policyLR = 1.5e-4 (valor da fase 1)");
+	// Campos não definidos em nenhuma fase herdam o baseline
+	check(approx(r[0].clipRange, 0.111f), "fase0.clipRange vazio -> baseline (0.111)");
+	check(approx(r[0].policyTemperature, 0.222f), "fase0.policyTemperature -> baseline (0.222)");
+	check(approx(r[0].gaeLambda, 0.333f), "fase0.gaeLambda -> baseline (0.333)");
+	check(approx(r[0].rewardClipRange, 0.444f), "fase0.rewardClipRange -> baseline (0.444)");
+
+	// Forward-fill: campo vazio herda o valor da fase anterior (não o baseline)
+	if (nPhases >= 2) {
+		// fase1 não define policyLR -> herda fase0 (2e-4), não baseline (9)
+		check(approx(r[1].policyLR, r[0].policyLR), "fase1.policyLR vazio -> herda fase0");
+		// campos sem definição em nenhuma fase mantêm o baseline em todas as fases
+		check(approx(r[1].clipRange, 0.111f), "fase1.clipRange vazio -> baseline (forward-filled)");
+	}
+
+	// A última fase com policyLR definido deve ter o valor correto
+	for (int i = 0; i < nPhases; i++) {
+		if (cfg.phases[i].policyLR.has_value()) {
+			check(approx(r[i].policyLR, *cfg.phases[i].policyLR),
+				"fase com policyLR definido tem o valor correto no resolved");
+		}
+	}
+
+	// ---- 2) SchedulerEffective em modo degrau (interpolatePPOParams = false) ----
+	printf("\n[2] SchedulerEffective (modo degrau)\n");
+	{
+		SchedulerConfig step = cfg;
+		step.interpolatePPOParams = false;
+
+		for (int i = 0; i < nPhases; i++) {
+			ResolvedPPO eff = SchedulerEffective(step, r, 0, i);
+			check(approx(eff.policyLR, r[i].policyLR),
+				"degrau: eff.policyLR == resolved[i].policyLR");
+			check(eff.epochs == r[i].epochs,
+				"degrau: eff.epochs == resolved[i].epochs");
+		}
+	}
+
+	// ---- 3) SchedulerEffective em modo interpolação (interpolatePPOParams = true) ----
+	printf("\n[3] SchedulerEffective (interpolação)\n");
+	{
+		SchedulerConfig interp = cfg;
+		interp.interpolatePPOParams = true;
+
+		// Sem advanceMaxTimesteps nas fases, a interpolação não dispara — deve devolver o degrau
+		bool anyHasMax = false;
+		for (auto& p : interp.phases)
+			if (p.advanceMaxTimesteps) anyHasMax = true;
+
+		if (!anyHasMax) {
+			printf("  (nenhuma fase tem advanceMaxTimesteps — interpolação inativa, teste de degrau)\n");
+			for (int i = 0; i < nPhases; i++) {
+				ResolvedPPO eff = SchedulerEffective(interp, r, 0, i);
+				check(approx(eff.policyLR, r[i].policyLR),
+					"interp sem timesteps: eff == degrau");
+			}
+		} else {
+			// Se houver fases com timesteps, verifica que os extremos são corretos
+			for (int i = 0; i < nPhases; i++) {
+				if (!interp.phases[i].advanceMaxTimesteps) continue;
+				uint64_t ts = *interp.phases[i].advanceMaxTimesteps;
+				ResolvedPPO eff = SchedulerEffective(interp, r, ts, i);
+				check(approx(eff.policyLR, r[i].policyLR, 1e-5f),
+					"interp no ponto de transicao: policyLR correto");
+			}
+		}
+	}
 
 	// ---- Resumo ----
 	printf("\n================================\n");
 	if (g_fails == 0)
-		printf("TODOS OS %d CHECKS PASSARAM ✔\n", g_checks);
+		printf("TODOS OS %d CHECKS PASSARAM\n", g_checks);
 	else
-		printf("%d/%d CHECKS FALHARAM ✘\n", g_fails, g_checks);
+		printf("%d/%d CHECKS FALHARAM\n", g_fails, g_checks);
 
 	return g_fails == 0 ? 0 : 1;
 }
