@@ -38,7 +38,29 @@
 	            ao longo dos timesteps entre as duas fases. Só faz sentido se
 	            advanceMaxTimesteps estiver definido nas fases (senão não há
 	            ponto de chegada para interpolar). Para treino normal deixa false.
+
+	FASE DE TRANSIÇÃO (transition):
+	  Quando a condição de avanço de uma fase é atingida, em vez de saltar logo
+	  para a fase seguinte podes correr uma fase intermédia de `lengthTimesteps`
+	  timesteps. Durante essa janela, os pesos são interpolados LINEARMENTE dos
+	  valores atuais (fim da fase atual) para os da fase seguinte. Cada
+	  comportamento é ligado/desligado pela sua flag:
+	    - lerpRewards      : interpola os pesos das rewards.
+	    - lerpStateWeights : interpola os pesos dos state setters (distribuição de cenários).
+	  Durante a transição NÃO se verifica win rate (não há novo avanço) e os
+	  parâmetros PPO, params, terminais e flag stochastic ficam nos valores da
+	  fase de origem; a fase seguinte é aplicada por inteiro (em degrau) no fim da
+	  transição. lengthTimesteps == 0 (ou ambas as flags false) = salto imediato
+	  (comportamento clássico). Define o default global em SchedulerConfig::transition
+	  e/ou override por fase em TrainingPhase::transition (transição AO SAIR dessa fase).
 */
+
+// Comportamento da fase de transição entre uma fase e a seguinte.
+struct TransitionConfig {
+	uint64_t lengthTimesteps = 0;   // 0 = sem transição (salto imediato)
+	bool lerpRewards      = false;  // interpola pesos das rewards (atual -> seguinte)
+	bool lerpStateWeights = false;  // interpola pesos dos state setters (distribuição)
+};
 
 struct TrainingPhase {
 	std::string name;
@@ -80,12 +102,19 @@ struct TrainingPhase {
 	// --- Condições terminais ativas (atualização parcial; vazio = sem alteração) ---
 	// Nomes: os que puseste nas entries do SchedulableTerminal em EnvCreateFunc.
 	std::unordered_map<std::string, bool> terminalActive;
+
+	// --- Transição AO SAIR desta fase (override; vazio = usa SchedulerConfig::transition) ---
+	std::optional<TransitionConfig> transition;
 };
 
 struct SchedulerConfig {
 	// false = mudança em degrau ao transitar de fase (recomendado com fases por métrica)
 	// true  = interpolação linear entre fases — só útil se advanceMaxTimesteps estiver definido
 	bool interpolatePPOParams = false;
+
+	// Transição por defeito aplicada a TODAS as fases (a menos que a fase tenha override).
+	TransitionConfig transition;
+
 	std::vector<TrainingPhase> phases;
 };
 
@@ -96,6 +125,15 @@ struct SchedulerConfig {
 inline SchedulerConfig GetSchedulerConfig() {
 	SchedulerConfig cfg;
 	cfg.interpolatePPOParams = false;
+
+	// Transição suave por defeito entre fases: ao atingir o limiar de win rate, corre
+	// 2M timesteps a interpolar pesos de rewards + distribuição de estados antes de
+	// fixar a fase seguinte. Põe lengthTimesteps = 0 para voltar ao salto em degrau.
+	cfg.transition = TransitionConfig{
+		.lengthTimesteps  = 2'000'000,
+		.lerpRewards      = true,
+		.lerpStateWeights = true,
+	};
 
 	cfg.phases = {
 

@@ -392,29 +392,146 @@ void Scheduler::Update(Learner* learner, Report& report) {
 
 	uint64_t ts = learner->totalTimesteps;
 
-	printf("\n[Scheduler] === Iteracao %lld | Fase %d: \"%s\" | %llu ts ===\n",
-		(long long)it,
-		currentPhaseIdx,
-		cfg.phases[currentPhaseIdx].name.c_str(),
-		(unsigned long long)ts);
+	if (inTransition) {
+		double frac = (transitionEndTs > transitionStartTs)
+			? (double)(ts - transitionStartTs) / (double)(transitionEndTs - transitionStartTs) : 1.0;
+		frac = frac < 0 ? 0 : (frac > 1 ? 1 : frac);
+		printf("\n[Scheduler] === Iteracao %lld | TRANSICAO fase %d -> %d (%.0f%%) | %llu ts ===\n",
+			(long long)it, currentPhaseIdx, transitionTargetIdx, frac * 100.0,
+			(unsigned long long)ts);
+	} else {
+		printf("\n[Scheduler] === Iteracao %lld | Fase %d: \"%s\" | %llu ts ===\n",
+			(long long)it, currentPhaseIdx, cfg.phases[currentPhaseIdx].name.c_str(),
+			(unsigned long long)ts);
+	}
 
-	// 1. Recolhe stats por estado (e adiciona ao report para wandb)
+	// 1. Recolhe stats por estado (e adiciona ao report para wandb).
+	//    Mantém-se durante a transição para continuar a alimentar o wandb e limpar contadores.
 	auto stats = CollectPerStateStats(learner, report);
 
-	// 2. Verifica se avança de fase
+	// 2a. Em transição: interpola pesos e termina quando a janela acaba (sem novo avanço).
+	if (inTransition) {
+		UpdateTransition(learner, ts);
+		if (ts >= transitionEndTs)
+			FinalizeTransition(learner, ts, it);
+		printf("[Scheduler] ================================================\n");
+		return;
+	}
+
+	// 2b. Verifica se avança de fase
 	if (ShouldAdvance(stats, ts)) {
-		currentPhaseIdx++;
-		consecutiveIters = 0;
-		printf("[Scheduler] *** AVANCA para fase %d: \"%s\" @ %llu ts ***\n",
-			currentPhaseIdx,
-			cfg.phases[currentPhaseIdx].name.c_str(),
-			(unsigned long long)ts);
-		ApplyPhase(learner, currentPhaseIdx);
-		SavePhase(learner);
-		LogPhaseEvent("Transicao de fase", currentPhaseIdx, ts, it);
+		TransitionConfig tc = ResolveTransition(currentPhaseIdx);
+		if (tc.lengthTimesteps > 0 && (tc.lerpRewards || tc.lerpStateWeights)) {
+			BeginTransition(learner, ts);
+		} else {
+			// Salto imediato (comportamento clássico, sem transição).
+			currentPhaseIdx++;
+			consecutiveIters = 0;
+			printf("[Scheduler] *** AVANCA para fase %d: \"%s\" @ %llu ts ***\n",
+				currentPhaseIdx,
+				cfg.phases[currentPhaseIdx].name.c_str(),
+				(unsigned long long)ts);
+			ApplyPhase(learner, currentPhaseIdx);
+			SavePhase(learner);
+			LogPhaseEvent("Transicao de fase", currentPhaseIdx, ts, it);
+		}
 	} else if (cfg.interpolatePPOParams) {
 		ApplyPPO(learner, ts, currentPhaseIdx);
 	}
 
 	printf("[Scheduler] ================================================\n");
+}
+
+// ---------------------------------------------------------------------------
+// Transição entre fases — interpolação linear de pesos
+// ---------------------------------------------------------------------------
+TransitionConfig Scheduler::ResolveTransition(int phaseIdx) const {
+	const TrainingPhase& p = cfg.phases[phaseIdx];
+	return p.transition.has_value() ? *p.transition : cfg.transition;
+}
+
+void Scheduler::BeginTransition(Learner* learner, uint64_t ts) {
+	transitionCfg       = ResolveTransition(currentPhaseIdx);
+	inTransition        = true;
+	transitionStartTs   = ts;
+	transitionEndTs     = ts + transitionCfg.lengthTimesteps;
+	transitionTargetIdx = currentPhaseIdx + 1;
+	consecutiveIters    = 0;
+
+	// Snapshot dos pesos atuais (= pesos efetivos no fim da fase de origem).
+	transitionStartRewardW.clear();
+	if (!learner->envSet->rewards.empty()) {
+		auto& arena0 = learner->envSet->rewards[0];
+		for (size_t i = 0; i < arena0.size() && i < g_rewardNames.size(); i++)
+			transitionStartRewardW[g_rewardNames[i]] = arena0[i].weight;
+	}
+	transitionStartStateW.clear();
+	for (auto* s : learner->envSet->stateSetters) {
+		auto* ss = dynamic_cast<SchedulableState*>(s);
+		if (ss) { transitionStartStateW = ss->GetWeights(); break; }
+	}
+
+	printf("[Scheduler] *** INICIA TRANSICAO fase %d -> %d (%llu ts: %s%s) @ %llu ts ***\n",
+		currentPhaseIdx, transitionTargetIdx,
+		(unsigned long long)transitionCfg.lengthTimesteps,
+		transitionCfg.lerpRewards ? "lerpRewards " : "",
+		transitionCfg.lerpStateWeights ? "lerpStateWeights" : "",
+		(unsigned long long)ts);
+	LogPhaseEvent("Inicio de transicao", transitionTargetIdx, ts, lastIteration);
+}
+
+void Scheduler::UpdateTransition(Learner* learner, uint64_t ts) {
+	double t = (transitionEndTs > transitionStartTs)
+		? (double)(ts - transitionStartTs) / (double)(transitionEndTs - transitionStartTs) : 1.0;
+	t = t < 0 ? 0 : (t > 1 ? 1 : t);
+
+	const TrainingPhase& next = cfg.phases[transitionTargetIdx];
+
+	// Pesos das rewards: lerp de start -> alvo (alvo = valor da fase seguinte se
+	// especificado, senão mantém o de partida — forward-fill).
+	if (transitionCfg.lerpRewards) {
+		std::unordered_map<std::string, float> w;
+		for (auto& [name, startW] : transitionStartRewardW) {
+			float target = startW;
+			auto it = next.rewardWeights.find(name);
+			if (it != next.rewardWeights.end()) target = it->second;
+			w[name] = (float)(startW + (target - startW) * t);
+		}
+		for (auto& arenaRewards : learner->envSet->rewards)
+			for (size_t i = 0; i < arenaRewards.size() && i < g_rewardNames.size(); i++) {
+				auto it = w.find(g_rewardNames[i]);
+				if (it != w.end()) arenaRewards[i].weight = it->second;
+			}
+	}
+
+	// Pesos dos state setters (distribuição de cenários): mesma lógica.
+	if (transitionCfg.lerpStateWeights) {
+		std::unordered_map<std::string, float> w;
+		for (auto& [name, startW] : transitionStartStateW) {
+			float target = startW;
+			auto it = next.stateWeights.find(name);
+			if (it != next.stateWeights.end()) target = it->second;
+			w[name] = (float)(startW + (target - startW) * t);
+		}
+		for (auto* s : learner->envSet->stateSetters) {
+			auto* ss = dynamic_cast<SchedulableState*>(s);
+			if (ss) ss->SetWeights(w);
+		}
+	}
+}
+
+void Scheduler::FinalizeTransition(Learner* learner, uint64_t ts, int64_t iter) {
+	inTransition    = false;
+	currentPhaseIdx = transitionTargetIdx;
+	consecutiveIters = 0;
+
+	// Aplica a fase de destino por inteiro: fixa pesos exatos, params, terminais,
+	// flag stochastic e parâmetros PPO (o que a transição não interpolou).
+	ApplyPhase(learner, currentPhaseIdx);
+	SavePhase(learner);
+
+	printf("[Scheduler] *** FIM DA TRANSICAO — entra na fase %d: \"%s\" @ %llu ts ***\n",
+		currentPhaseIdx, cfg.phases[currentPhaseIdx].name.c_str(),
+		(unsigned long long)ts);
+	LogPhaseEvent("Fim de transicao", currentPhaseIdx, ts, iter);
 }

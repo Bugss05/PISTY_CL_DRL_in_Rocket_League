@@ -54,6 +54,14 @@ public:
 	void SetStochastic(bool s) { stochastic = s; }
 	bool IsStochastic() const  { return stochastic; }
 
+	// Pesos atuais por nome (snapshot para interpolação de transição).
+	std::unordered_map<std::string, float> GetWeights() const {
+		std::unordered_map<std::string, float> m;
+		for (auto& e : entries)
+			m[e.name] = e.weight;
+		return m;
+	}
+
 	// Atualização PARCIAL: só altera os setters cujo nome está no mapa.
 	void SetWeights(const std::unordered_map<std::string, float>& weights) {
 		for (auto& e : entries) {
