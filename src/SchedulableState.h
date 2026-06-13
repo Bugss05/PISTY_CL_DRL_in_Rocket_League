@@ -63,6 +63,19 @@ public:
 		}
 	}
 
+	// Atualização PARCIAL de parâmetros: para cada setter cujo nome está no mapa,
+	// encaminha cada (param -> valor) para StateSetter::SetParam. Setters sem
+	// parâmetros ignoram (no-op da base).
+	void SetParams(const std::unordered_map<std::string, std::unordered_map<std::string, float>>& params) {
+		for (auto& e : entries) {
+			auto it = params.find(e.name);
+			if (it == params.end())
+				continue;
+			for (auto& [key, value] : it->second)
+				e.setter->SetParam(key, value);
+		}
+	}
+
 	// Chamado pelo Scheduler quando state.goalScored == true para esta arena.
 	void NotifyGoal() {
 		if (activeEntryIdx >= 0)

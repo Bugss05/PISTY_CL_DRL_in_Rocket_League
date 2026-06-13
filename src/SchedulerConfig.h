@@ -24,6 +24,14 @@
 	Nomes de setters: a label que deste no SchedulableState dentro de EnvCreateFunc.
 	Nomes de terminais: a string que puseste nas entries do SchedulableTerminal em EnvCreateFunc.
 
+	Parâmetros (além do peso): para as rewards/setters que implementam SetParam, podes
+	mudar argumentos do construtor por fase via rewardParams / stateParams. Ex.:
+	  .rewardParams = { { "StrongTouch", { {"minSpeedKPH", 40.f}, {"maxSpeedKPH", 150.f} } } }
+	  .stateParams  = { { "GoalShot",    { {"radius", 1600.f} } } }
+	As unidades são as MESMAS dos argumentos do construtor. Chaves desconhecidas são ignoradas.
+	Quais rewards/setters aceitam params: ver os override de SetParam em CommonRewards.h e
+	nos StateSetters (ex.: GoalShotState). É atualização PARCIAL (forward-fill como os pesos).
+
 	interpolatePPOParams (false por defeito com fases por métricas):
 	  - false : cada parâmetro PPO muda em DEGRAU quando a fase avança.
 	  - true  : interpola LINEARMENTE entre o valor atual e o da fase seguinte,
@@ -54,9 +62,20 @@ struct TrainingPhase {
 	// --- Pesos das rewards, por nome (atualização parcial) ---
 	std::unordered_map<std::string, float> rewardWeights;
 
+	// --- Parâmetros das rewards, por nome -> (param -> valor) (atualização parcial) ---
+	// Só aplica às rewards que implementam Reward::SetParam (ver CommonRewards.h).
+	// Ex.: { "StrongTouch", { {"minSpeedKPH", 40.f}, {"maxSpeedKPH", 150.f} } }
+	// Unidades = as MESMAS dos argumentos do construtor da reward.
+	std::unordered_map<std::string, std::unordered_map<std::string, float>> rewardParams;
+
 	// --- State setters ---
 	std::optional<bool> stochastic;
 	std::unordered_map<std::string, float> stateWeights;
+
+	// --- Parâmetros dos state setters, por nome -> (param -> valor) (atualização parcial) ---
+	// Só aplica aos setters que implementam StateSetter::SetParam (ex.: GoalShotState "radius").
+	// Ex.: { "GoalShot", { {"radius", 1600.f} } }
+	std::unordered_map<std::string, std::unordered_map<std::string, float>> stateParams;
 
 	// --- Condições terminais ativas (atualização parcial; vazio = sem alteração) ---
 	// Nomes: os que puseste nas entries do SchedulableTerminal em EnvCreateFunc.
@@ -150,6 +169,10 @@ inline SchedulerConfig GetSchedulerConfig() {
 				{ "FallingBall", 0.0f },
 				{ "Pass",        0.0f },
 			},
+			// Exemplo: alargar o raio de spawn do GoalShot nesta fase (params além do peso).
+			.stateParams = {
+				{ "GoalShot", { { "radius", 1600.f } } },
+			},
 			.terminalActive = {
 				{ "BallTouch", false }, // desativa terminal de toque para permitir múltiplos toques e foco na direção},
 				{ "NoTouch",   false },
@@ -209,6 +232,11 @@ inline SchedulerConfig GetSchedulerConfig() {
 				{ "VelocityBallToGoal",   5.0f  },
 				{ "GoalBonus",            500.0f},
 				{ "GoalDistancePotential",2.0f  },
+			},
+			// Exemplo: ajustar a janela de velocidade do StrongTouch (params além do peso).
+			// Só tem efeito quando StrongTouch tiver peso > 0 nesta/noutra fase.
+			.rewardParams = {
+				{ "StrongTouch", { { "minSpeedKPH", 40.f }, { "maxSpeedKPH", 150.f } } },
 			},
 			.stochastic   = true,
 			.stateWeights = {

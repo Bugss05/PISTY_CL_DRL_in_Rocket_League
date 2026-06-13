@@ -34,6 +34,11 @@ namespace RLGC {
 		float concedeScale;
 		GoalReward(float concedeScale = -1) : concedeScale(concedeScale) {}
 
+		// Schedulable param: "concedeScale" (reward applied when the opponent scores).
+		virtual void SetParam(const std::string& key, float value) override {
+			if (key == "concedeScale") concedeScale = value;
+		}
+
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) {
 			if (!state.goalScored)
 				return 0;
@@ -48,6 +53,12 @@ namespace RLGC {
 	public:
 		bool isNegative;
 		VelocityReward(bool isNegative = false) : isNegative(isNegative) {}
+
+		// Schedulable param: "isNegative" (0 = false, non-zero = true).
+		virtual void SetParam(const std::string& key, float value) override {
+			if (key == "isNegative") isNegative = (value != 0.0f);
+		}
+
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) {
 			return player.vel.Length() / CommonValues::CAR_MAX_SPEED * (1 - 2 * isNegative);
 		}
@@ -58,6 +69,11 @@ namespace RLGC {
 	public:
 		bool ownGoal = false;
 		VelocityBallToGoalReward(bool ownGoal = false) : ownGoal(ownGoal) {}
+
+		// Schedulable param: "ownGoal" (0 = false, non-zero = true).
+		virtual void SetParam(const std::string& key, float value) override {
+			if (key == "ownGoal") ownGoal = (value != 0.0f);
+		}
 
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) {
 			bool targetOrangeGoal = player.team == Team::BLUE;
@@ -112,6 +128,11 @@ namespace RLGC {
 	public:
 		float penalty;
 		BallTouchGroundPenalty(float penalty = -5.0f) : penalty(penalty) {}
+
+		// Schedulable param: "penalty" (value applied when the ball hits the ground).
+		virtual void SetParam(const std::string& key, float value) override {
+			if (key == "penalty") penalty = value;
+		}
 
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) {
 			if (!state.prev) return 0.0f;
@@ -168,6 +189,11 @@ namespace RLGC {
 		float exponent;
 		SaveBoostReward(float exponent = 0.5f) : exponent(exponent) {}
 
+		// Schedulable param: "exponent".
+		virtual void SetParam(const std::string& key, float value) override {
+			if (key == "exponent") exponent = value;
+		}
+
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) {
 			return RS_CLAMP(powf(player.boost / 100, exponent), 0, 1);
 		}
@@ -214,6 +240,12 @@ namespace RLGC {
 		StrongTouchReward(float minSpeedKPH = 20, float maxSpeedKPH = 130) {
 			minRewardedVel = RLGC::Math::KPHToVel(minSpeedKPH);
 			maxRewardedVel = RLGC::Math::KPHToVel(maxSpeedKPH);
+		}
+
+		// Schedulable params: "minSpeedKPH", "maxSpeedKPH" (same units as the constructor).
+		virtual void SetParam(const std::string& key, float value) override {
+			if (key == "minSpeedKPH")      minRewardedVel = RLGC::Math::KPHToVel(value);
+			else if (key == "maxSpeedKPH") maxRewardedVel = RLGC::Math::KPHToVel(value);
 		}
 
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
@@ -642,6 +674,12 @@ namespace RLGC {
 	public:
 		AerialDistanceReward(float heightScale = 1.0f, float distanceScale = 1.0f)
 			: heightScale(heightScale), distanceScale(distanceScale) {}
+
+		// Schedulable params: "heightScale", "distanceScale".
+		virtual void SetParam(const std::string& key, float value) override {
+			if (key == "heightScale")        heightScale = value;
+			else if (key == "distanceScale") distanceScale = value;
+		}
 
 		virtual void Reset(const GameState& state) override {
 			currentCarId = 0;

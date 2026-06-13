@@ -285,6 +285,12 @@ void Scheduler::ApplyPhaseWeights(Learner* learner, const TrainingPhase& p) {
 			auto it = p.rewardWeights.find(g_rewardNames[i]);
 			if (it != p.rewardWeights.end())
 				arenaRewards[i].weight = it->second;
+
+			// Parâmetros além do peso (só afeta rewards que implementam SetParam).
+			auto pit = p.rewardParams.find(g_rewardNames[i]);
+			if (pit != p.rewardParams.end())
+				for (auto& [key, value] : pit->second)
+					arenaRewards[i].reward->SetParam(key, value);
 		}
 	}
 	for (auto* s : learner->envSet->stateSetters) {
@@ -294,6 +300,22 @@ void Scheduler::ApplyPhaseWeights(Learner* learner, const TrainingPhase& p) {
 			ss->SetStochastic(*p.stochastic);
 		if (!p.stateWeights.empty())
 			ss->SetWeights(p.stateWeights);
+		if (!p.stateParams.empty())
+			ss->SetParams(p.stateParams);
+	}
+
+	// Log dos parâmetros aplicados (uma vez por fase, a partir do config — não por arena).
+	if (!p.rewardParams.empty()) {
+		printf("[Scheduler]   Reward params atualizados:\n");
+		for (auto& [rname, params] : p.rewardParams)
+			for (auto& [key, value] : params)
+				printf("[Scheduler]     %-16s . %-12s = %g\n", rname.c_str(), key.c_str(), value);
+	}
+	if (!p.stateParams.empty()) {
+		printf("[Scheduler]   State params atualizados:\n");
+		for (auto& [sname, params] : p.stateParams)
+			for (auto& [key, value] : params)
+				printf("[Scheduler]     %-16s . %-12s = %g\n", sname.c_str(), key.c_str(), value);
 	}
 
 	if (!p.terminalActive.empty()) {
