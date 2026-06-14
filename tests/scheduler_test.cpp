@@ -5,6 +5,7 @@
 //                              build/scheduler_test
 
 #include "SchedulerCore.h"
+#include "SchedulerConfig.h"  // GetSchedulerConfig() (currículo real); SchedulerCore.h só traz os tipos
 #include <cstdio>
 #include <cmath>
 

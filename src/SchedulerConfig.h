@@ -1,4 +1,5 @@
 #pragma once
+#include "SchedulerTypes.h"   // TransitionConfig, TrainingPhase, SchedulerConfig (o schema)
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -24,13 +25,15 @@
 	Nomes de setters: a label que deste no SchedulableState dentro de EnvCreateFunc.
 	Nomes de terminais: a string que puseste nas entries do SchedulableTerminal em EnvCreateFunc.
 
-	Parâmetros (além do peso): para as rewards/setters que implementam SetParam, podes
-	mudar argumentos do construtor por fase via rewardParams / stateParams. Ex.:
-	  .rewardParams = { { "StrongTouch", { {"minSpeedKPH", 40.f}, {"maxSpeedKPH", 150.f} } } }
-	  .stateParams  = { { "GoalShot",    { {"radius", 1600.f} } } }
+	Parâmetros (além do peso): para as rewards/setters/terminais que implementam SetParam,
+	podes mudar argumentos do construtor por fase via rewardParams / stateParams / terminalParams. Ex.:
+	  .rewardParams   = { { "StrongTouch", { {"minSpeedKPH", 40.f}, {"maxSpeedKPH", 150.f} } } }
+	  .stateParams    = { { "GoalShot",    { {"radius", 1600.f}, {"minHeight", 92.75f}, {"maxHeight", 550.f} } } }
+	  .terminalParams = { { "Timeout",     { {"seconds", 20.f} } } }
 	As unidades são as MESMAS dos argumentos do construtor. Chaves desconhecidas são ignoradas.
-	Quais rewards/setters aceitam params: ver os override de SetParam em CommonRewards.h e
-	nos StateSetters (ex.: GoalShotState). É atualização PARCIAL (forward-fill como os pesos).
+	Quais aceitam params: ver os override de SetParam em CommonRewards.h, nos StateSetters
+	(ex.: GoalShotState radius/minHeight/maxHeight) e em TimeoutCondition (seconds).
+	É atualização PARCIAL (forward-fill como os pesos).
 
 	interpolatePPOParams (false por defeito com fases por métricas):
 	  - false : cada parâmetro PPO muda em DEGRAU quando a fase avança.
@@ -55,68 +58,8 @@
 	  e/ou override por fase em TrainingPhase::transition (transição AO SAIR dessa fase).
 */
 
-// Comportamento da fase de transição entre uma fase e a seguinte.
-struct TransitionConfig {
-	uint64_t lengthTimesteps = 0;   // 0 = sem transição (salto imediato)
-	bool lerpRewards      = false;  // interpola pesos das rewards (atual -> seguinte)
-	bool lerpStateWeights = false;  // interpola pesos dos state setters (distribuição)
-};
-
-struct TrainingPhase {
-	std::string name;
-
-	// --- Condição de avanço para a PRÓXIMA fase ---
-	std::optional<float>    advanceWinRate;       // limiar de golos/episódios (0.0-1.0)
-	std::optional<int>      advanceItersNeeded;   // iterações consecutivas acima do limiar
-	std::optional<uint64_t> advanceMaxTimesteps;  // safety net: avança de qualquer forma
-
-	// --- Parâmetros PPO (vazio = manter valor anterior) ---
-	std::optional<float> policyLR;
-	std::optional<float> criticLR;
-	std::optional<float> entropyScale;
-	std::optional<float> clipRange;
-	std::optional<float> policyTemperature;
-	std::optional<int>   epochs;
-	std::optional<float> gaeGamma;
-	std::optional<float> gaeLambda;
-	std::optional<float> rewardClipRange;
-
-	// --- Pesos das rewards, por nome (atualização parcial) ---
-	std::unordered_map<std::string, float> rewardWeights;
-
-	// --- Parâmetros das rewards, por nome -> (param -> valor) (atualização parcial) ---
-	// Só aplica às rewards que implementam Reward::SetParam (ver CommonRewards.h).
-	// Ex.: { "StrongTouch", { {"minSpeedKPH", 40.f}, {"maxSpeedKPH", 150.f} } }
-	// Unidades = as MESMAS dos argumentos do construtor da reward.
-	std::unordered_map<std::string, std::unordered_map<std::string, float>> rewardParams;
-
-	// --- State setters ---
-	std::optional<bool> stochastic;
-	std::unordered_map<std::string, float> stateWeights;
-
-	// --- Parâmetros dos state setters, por nome -> (param -> valor) (atualização parcial) ---
-	// Só aplica aos setters que implementam StateSetter::SetParam (ex.: GoalShotState "radius").
-	// Ex.: { "GoalShot", { {"radius", 1600.f} } }
-	std::unordered_map<std::string, std::unordered_map<std::string, float>> stateParams;
-
-	// --- Condições terminais ativas (atualização parcial; vazio = sem alteração) ---
-	// Nomes: os que puseste nas entries do SchedulableTerminal em EnvCreateFunc.
-	std::unordered_map<std::string, bool> terminalActive;
-
-	// --- Transição AO SAIR desta fase (override; vazio = usa SchedulerConfig::transition) ---
-	std::optional<TransitionConfig> transition;
-};
-
-struct SchedulerConfig {
-	// false = mudança em degrau ao transitar de fase (recomendado com fases por métrica)
-	// true  = interpolação linear entre fases — só útil se advanceMaxTimesteps estiver definido
-	bool interpolatePPOParams = false;
-
-	// Transição por defeito aplicada a TODAS as fases (a menos que a fase tenha override).
-	TransitionConfig transition;
-
-	std::vector<TrainingPhase> phases;
-};
+// As definições de TransitionConfig / TrainingPhase / SchedulerConfig vivem em SchedulerTypes.h.
+// Aqui só preenches a data (o currículo) em GetSchedulerConfig().
 
 // ------------------------------------------------------------------------------------------
 //  Define o teu currículo aqui. As fases são percorridas em ordem; a última é permanente.
@@ -127,23 +70,31 @@ inline SchedulerConfig GetSchedulerConfig() {
 	cfg.interpolatePPOParams = false;
 
 	// Transição suave por defeito entre fases: ao atingir o limiar de win rate, corre
-	// 2M timesteps a interpolar pesos de rewards + distribuição de estados antes de
-	// fixar a fase seguinte. Põe lengthTimesteps = 0 para voltar ao salto em degrau.
+	// 5M timesteps a interpolar LINEARMENTE os pesos das rewards + a distribuição de estados
+	// antes de fixar a fase seguinte. As alturas (stateParams), o timeout (terminalParams), os
+	// terminais e o PPO mudam em DEGRAU no fim da janela. lengthTimesteps = 0 = salto imediato.
 	cfg.transition = TransitionConfig{
-		.lengthTimesteps  = 2'000'000,
+		.lengthTimesteps  = 5'000'000,  // pesos das rewards mudam pouco a pouco ao longo de 5M steps
 		.lerpRewards      = true,
-		.lerpStateWeights = true,
+		.lerpStateWeights = false,
 	};
+
+	// Notas de altura (uu): teto do campo CEILING_Z = 2044 -> metade ≈ 1022.
+	//   - GoalShot: limitado por código a ≈550 (barra GOAL_HEIGHT-BALL_RADIUS) p/ a bola não
+	//     passar por cima do golo. "no chão" = 92.75.
+	//   - "um pouco acima de metade do campo" -> 1200 (topo do Pass alto / FallingBall).
+	// Win rate por fase: contabiliza TOQUE enquanto BallTouch estiver ON; passa a contar GOLOS
+	// quando BallTouch fica OFF (ver Scheduler::OnBallTouched / OnGoalScored).
 
 	cfg.phases = {
 
 		// ══════════════════════════════════════════════════════════════
-		// FASES DE REMATE (chão)
+		// BLOCO A — TOCAR NA BOLA (win = toque; BallTouch ON)
+		// Sobe a bola pouco a pouco (GoalShot do chão até à barra) e encurta o episódio.
 		// ══════════════════════════════════════════════════════════════
 
-		// -------- Fase 1: tocar a bola --------
-		// Objetivo: aproximar e tocar. Episódio termina ao toque.
-		// Rewards: aproximação + toque com velocidade. Sem direção à baliza (ainda não interessa).
+		// -------- Fase 1: tocar a bola (como está hoje) --------
+		// GoalShot no chão, FallingBall nos valores normais. Só aproximar e tocar.
 		TrainingPhase{
 			.name               = "1-TocarBola",
 			.advanceWinRate     = 0.85f,
@@ -156,19 +107,285 @@ inline SchedulerConfig GetSchedulerConfig() {
 			.gaeGamma     = 0.99f,
 
 			.rewardWeights = {
-				{ "VelocityPlayerToBall", 5.0f  },  // aproximação à bola
-				{ "TouchAccel",        200.0f },  // tocar com velocidade = win
-				{ "VelocityBallToGoal",   0.0f  },
-				{ "GoalBonus",            0.0f  },
-				{ "FaceBall",             1.0f  },  // NOVO: recompensar alinhamento com a bola
-				{ "LandAllFours",         0.3f  },  // NOVO: recompensar aterragem estável após toque aéreo}
-				{ "Velocity",             0.2f  },  // NOVO: recompensa geral por velocidade, para incentivar movimento mesmo que ainda não acerte na bola
-				{ "ConstantPenalty",     -0.2f },  // NOVO: pequeno castigo por cada passo, para incentivar a resolver o episódio rápido
+				{ "GoalBonus",            0.0f   },
+				{ "VelocityBallToGoal",   0.0f   },
+				{ "VelocityPlayerToBall", 5.0f   },  // aproximação à bola
+				{ "FaceBall",             1.0f   },  // alinhar com a bola
+				{ "TouchBallAerial",      0.0f   },				
+				{ "TouchAccel",         200.0f   },  // tocar com velocidade = win
+				{ "StrongTouch",         30.0f   },				
+				{ "AerialDistance",       0.0f   },			
+				{"HeightMatch",           0.0f   },  // sem foco em elevar a bola nesta fase	
+				{ "Air",                  0.3f   },
+				{ "Speed",                0.4f   },
+				{ "BallTouchGround",     -2.0f   },
+				{ "Wavedash",             0.3f   },
+				{ "LandAllFours",         0.3f   },  // aterrar estável
+				{ "ConstantPenalty",     -0.1f   },  // resolver o episódio rápido
+				{ "VelocityTouch",         0.0f   },
+				{ "WallLaunch",            0.0f   },
+				{ "DoubleJumpBoost",       0.0f   },
+				{ "Whiff",                 0.0f   },
 			},
 			.stochastic   = true,
 			.stateWeights = {
 				{ "Random",      0.25f },
 				{ "GoalShot",    0.30f },
+				{ "FallingBall", 0.45f },
+			},
+			.stateParams = {
+				{ "GoalShot",    { { "minHeight", 92.75f }, { "maxHeight", 92.75f } } }, // bola no chão
+				{ "FallingBall", { { "minHeight", 400.f  }, { "maxHeight", 700.f  } } }, // valores normais
+			},
+			.terminalActive = {
+				{ "BallTouch", true  },
+				{ "NoTouch",   false },
+				{ "GoalScore", true  },
+				{ "Timeout",   true  },
+			},
+			.terminalParams = {
+				{ "Timeout", { { "seconds", 40.f } } },
+			},
+		},
+
+
+		TrainingPhase{
+			.name               = "1.2-Marcar golo simples",
+			.advanceWinRate     = 0.85f,
+			.advanceItersNeeded = 8,
+
+
+			.rewardWeights = {
+				{ "GoalBonus",            500.0f   },
+				{ "VelocityBallToGoal",   3.0f   },
+				{ "VelocityPlayerToBall", 2.0f   },  // aproximação à bola
+				{ "FaceBall",             1.0f   },  // alinhar com a bola
+				{ "TouchBallAerial",      3.0f   },				
+				{ "TouchAccel",           2.0f   },  // tocar com velocidade = win
+				{ "StrongTouch",          5.0f   },				
+				{ "AerialDistance",       0.0f   },			
+				{"HeightMatch",           0.0f   },  // sem foco em elevar a bola nesta fase	
+				{ "Air",                  0.7f   },
+				{ "Speed",                0.4f   },
+				{ "BallTouchGround",     -2.0f   },
+				{ "Wavedash",             1.0f   },
+				{ "LandAllFours",         0.8f   },  // aterrar estável
+				{ "ConstantPenalty",     -0.1f   },  // resolver o episódio rápido
+				{ "VelocityTouch",         0.0f   },
+				{ "WallLaunch",            0.0f   },
+				{ "DoubleJumpBoost",       0.8f   },
+				{ "Whiff",                 0.0f   },
+			},
+			.rewardParams = {
+    			{ "GoalBonus", { { "concedeScale", -0.1f } } },  // -1 = atual (-500) | -0.1 = ameno (~-50) | 0 = sem castigo
+			},
+			.stochastic   = true,
+			.stateWeights = {
+				{ "Random",      0.5f },
+				{ "GoalShot",    0.0f },
+				{ "FallingBall", 0.5f },
+			},
+			.stateParams = {
+				{ "GoalShot",    { { "minHeight", 92.75f }, { "maxHeight", 92.75f } } }, // bola no chão
+				{ "FallingBall", { { "minHeight", 400.f  }, { "maxHeight", 700.f  } } }, // valores normais
+			},
+			.terminalActive = {
+				{ "BallTouch", true  },
+				{ "NoTouch",   false },
+				{ "GoalScore", true  },
+				{ "Timeout",   true  },
+			},
+			.terminalParams = {
+				{ "Timeout", { { "seconds", 30.0f } } },
+			},
+		},
+
+		TrainingPhase{
+			.name               = "2-ElevarBola",
+			.advanceWinRate     = 0.80f,
+			.advanceItersNeeded = 8,
+
+			.rewardWeights = {
+				{ "GoalBonus",            500.0f   },
+				{ "VelocityBallToGoal",   3.0f   },
+				{ "VelocityPlayerToBall", 2.0f   },  // aproximação à bola
+				{ "FaceBall",             1.0f   },  // alinhar com a bola
+				{ "TouchBallAerial",      10.0f   },				
+				{ "TouchAccel",           1.0f   },  // tocar com velocidade = win
+				{ "StrongTouch",          2.0f   },				
+				{ "AerialDistance",       0.0f   },			
+				{"HeightMatch",           0.0f   },  // sem foco em elevar a bola nesta fase	
+				{ "Air",                  0.7f   },
+				{ "Speed",                0.2f   },
+				{ "BallTouchGround",     -4.0f   },
+				{ "Wavedash",             1.0f   },
+				{ "LandAllFours",         0.8f   },  // aterrar estável
+				{ "ConstantPenalty",     -0.1f   },  // resolver o episódio rápido
+				{ "VelocityTouch",         0.0f   },
+				{ "WallLaunch",            0.0f   },
+				{ "DoubleJumpBoost",       1.0f   },
+				{ "Whiff",                 -5.0f   },
+			},
+			.rewardParams = {
+    			{ "GoalBonus", { { "concedeScale", -0.1f } } },  // -1 = atual (-500) | -0.1 = ameno (~-50) | 0 = sem castigo
+			},
+			.stochastic   = true,
+			.stateWeights = {
+				{ "Random",      0.2f },
+				{ "GoalShot",    0.6f },
+				{ "FallingBall", 0.2f },
+			},
+			.stateParams = {
+				{ "GoalShot",    { { "minHeight", 92.75f }, { "maxHeight", 550.f } } }, // bola no chão
+				{ "FallingBall", { { "minHeight", 400.f  }, { "maxHeight", 700.f  } } }, // valores normais
+			},
+			.terminalActive = {
+				{ "BallTouch", true  },
+				{ "NoTouch",   false },
+				{ "GoalScore", true  },
+				{ "Timeout",   true  },
+			},
+			.terminalParams = {
+				{ "Timeout", { { "seconds", 30.0f } } },
+			},
+		},
+		// -------- Fase 2: elevar a bola --------
+		// Sobe o GoalShot do chão até à barra (≈550) e o FallingBall um pouco. Começam os
+		// "aéreos pequenos": recompensa aproximação aérea para ele aprender a mover-se no ar.
+		TrainingPhase{
+			.name               = "2-ElevarBola",
+			.advanceWinRate     = 0.80f,
+			.advanceItersNeeded = 8,
+
+			.rewardWeights = {
+				{ "GoalBonus",            500.0f   },
+				{ "VelocityBallToGoal",   5.0f   },
+				{ "VelocityPlayerToBall", 5.0f   },
+				{ "FaceBall",             1.0f   },
+				{ "TouchBallAerial",      4.0f   },				
+				{ "TouchAccel",           2.0f   },
+				{ "StrongTouch",          5.0f   },
+				{"HeightMatch",           0.0f   },  // sem foco em elevar a bola nesta fase	
+				{ "BallTouchGround",     -2.0f   }, // penaliza tocar a bola no chão (ajuda a elevar)				
+				{ "AerialDistance",       0.0f   },				
+				{ "Air",                  0.7f   },  
+				{ "Speed",                0.4f   },
+				{ "Wavedash",             2.0f   },
+				{ "LandAllFours",         0.6f   },
+				{ "ConstantPenalty",     -0.2f   },
+				{ "VelocityTouch",         0.0f   },
+				{ "WallLaunch",            0.0f   },
+				{ "DoubleJumpBoost",       3.0f   },
+				{ "Whiff",                 -3.0f   },
+			},
+			.rewardParams = {
+    			{ "GoalBonus", { { "concedeScale", -0.1f } } },  // -1 = atual (-500) | -0.1 = ameno (~-50) | 0 = sem castigo
+			},
+			.stochastic   = true,
+			.stateWeights = {
+				{ "Random",      0.25f },
+				{ "GoalShot",    0.25f },
+				{ "FallingBall", 0.5f },
+			},
+			.stateParams = {
+				{ "GoalShot",    { { "minHeight", 92.75f }, { "maxHeight", 550.f } } }, // até à barra
+				{ "FallingBall", { { "minHeight", 400.f }, { "maxHeight", 1200.f } } }, // range máximo
+			},
+			.terminalActive = {
+				{ "BallTouch", false },  // toque = win (explícito p/ ser correto ao retomar nesta fase)
+				{ "NoTouch",   false },
+				{ "GoalScore", true  },
+				{ "Timeout",   true  },
+			},
+			.terminalParams = {
+				{ "Timeout", { { "seconds", 40.f } } },
+			},
+		},
+/*
+		// -------- Fase 3: encurtar episódio para 30s --------
+		// Mesma distribuição; mais pressão temporal (ConstantPenalty maior).
+		TrainingPhase{
+			.name               = "3-Timeout30",
+			.advanceWinRate     = 0.80f,
+			.advanceItersNeeded = 8,
+
+			.rewardWeights = {
+				{ "GoalBonus",            0.0f   },
+				{ "VelocityBallToGoal",   0.0f   },
+				{ "VelocityPlayerToBall", 5.0f   },
+				{ "FaceBall",             1.0f   },
+				{ "TouchBallAerial",      0.0f   },				
+				{ "TouchAccel",         500.0f   },
+				{ "StrongTouch",         30.0f   },	
+				{"HeightMatch",          10.0f   },  			
+				{ "AerialDistance",       0.0f   },				
+				{ "Air",                  0.7f   },
+				{ "Speed",                0.4f   },
+				{ "Wavedash",             0.8f   },
+				{ "LandAllFours",         0.3f   },
+				{ "ConstantPenalty",     -0.5f   },  // mais pressão temporal
+				{ "VelocityTouch",         0.0f   },
+				{ "WallLaunch",            0.0f   },
+				{ "DoubleJumpBoost",       3.0f   },
+				{ "Whiff",                 0.0f   },
+				{ "BallTouchGround",       0.0f   },
+			},
+			.stochastic   = true,
+			.stateWeights = {
+				{ "Random",      0.0f },
+				{ "GoalShot",    0.8f },
+				{ "FallingBall", 0.2f },
+			},
+			.rewardParams = {
+    			{ "GoalBonus", { { "concedeScale", -0.1f } } },  // -1 = atual (-500) | -0.1 = ameno (~-50) | 0 = sem castigo
+			},
+			.stateParams = {
+				{ "GoalShot",    { { "minHeight", 92.75f }, { "maxHeight", 550.f } } }, // até à barra
+				{ "FallingBall", { { "minHeight", 400.f }, { "maxHeight", 1200.f } } }, // range máximo
+			},
+			.terminalActive = {
+				{ "BallTouch", true  },
+				{ "NoTouch",   false },
+				{ "GoalScore", true  },
+				{ "Timeout",   true  },
+			},
+			.terminalParams = {
+				{ "Timeout", { { "seconds", 30.f } } },
+			},
+
+		},
+
+		// -------- Fase 4: encurtar episódio para 20s --------
+		TrainingPhase{
+			.name               = "4-Timeout20",
+			.advanceWinRate     = 0.80f,
+			.advanceItersNeeded = 8,
+
+			.rewardWeights = {
+				{ "GoalBonus",            0.0f   },
+				{ "VelocityBallToGoal",   0.0f   },
+				{ "VelocityPlayerToBall", 4.0f   },
+				{ "FaceBall",             1.0f   },
+				{ "TouchBallAerial",      0.0f   },				
+				{ "TouchAccel",         500.0f   },
+				{ "StrongTouch",         30.0f   },		
+				{"HeightMatch",          10.0f   },		
+				{ "AerialDistance",       0.0f   },				
+				{ "Air",                  0.7f   },
+				{ "Speed",                0.4f   },
+				{ "Wavedash",             0.8f   },	
+				{ "LandAllFours",         0.3f   },
+				{ "ConstantPenalty",     -0.5f   },
+				{ "VelocityTouch",         0.0f   },
+				{ "WallLaunch",            0.0f   },
+				{ "DoubleJumpBoost",       3.0f   },
+				{ "Whiff",                 0.0f   },
+				{ "BallTouchGround",       0.0f   },
+			},
+			.stochastic   = true,
+			.stateWeights = {
+				{ "Random",      0.0f },
+				{ "GoalShot",    0.55f },
 				{ "FallingBall", 0.45f },
 			},
 			.terminalActive = {
@@ -177,68 +394,94 @@ inline SchedulerConfig GetSchedulerConfig() {
 				{ "GoalScore", true  },
 				{ "Timeout",   true  },
 			},
+			.terminalParams = {
+				{ "Timeout", { { "seconds", 20.f } } },
+			},
 		},
 
-		// -------- Fase 2: GoalShot — 1º toque direcionado --------
-		// Objetivo: no toque, enviar a bola para a baliza.
-		// Rewards: direção à baliza é agora a principal. Toque forte como secundário.
-		// VelocityPlayerToBall cai muito (já está perto no GoalShot).
-		TrainingPhase{
-			.name               = "2-GoalShot 1toque",
-			.advanceWinRate     = 0.90f,
-			.advanceItersNeeded = 8,
+		// ══════════════════════════════════════════════════════════════
+		// BLOCO B — MARCAR GOLOS (win = golo; BallTouch OFF)
+		// ══════════════════════════════════════════════════════════════
 
+		// -------- Fase 5: GoalShot — marcar com alturas aleatórias --------
+		// Só GoalShot, bola em qualquer altura do range (chão até barra). Direção à baliza
+		// passa a ser o foco. A partir daqui conta GOLOS (BallTouch desligado).
+		TrainingPhase{
+			.name               = "5-GoalShot-Marcar",
+			.advanceWinRate     = 0.80f,
+			.advanceItersNeeded = 8,
+			.gaeGamma	 = 0.995f,
 
 			.rewardWeights = {
-				{ "VelocityPlayerToBall", 3.0f  },
-				{ "TouchAccel",           20.0f },
-				{ "VelocityBallToGoal",   8.0f  },  // shaping: direcionar bola à baliza
-				{ "FaceBall",             1.0f  },
-				{ "LandAllFours",         0.3f  },
-				{ "Velocity",             0.2f  },
-				{ "ConstantPenalty",     -0.4f  },
-				{ "Goal",                 200.0f},
-				{ "GoalBonus",            0.0f  },
+
+				{ "GoalBonus",            200.0f   },
+				{ "VelocityBallToGoal",   8.0f   },  // direção à baliza
+				{ "VelocityPlayerToBall", 3.0f   },
+				{ "FaceBall",             1.0f   },
+				{ "TouchBallAerial",      0.0f   },				
+				{ "TouchAccel",          20.0f   },
+				{ "StrongTouch",         20.0f   },				
+				{ "AerialDistance",       0.0f   },	
+				{"HeightMatch",          10.0f   },			
+				{ "Air",                  0.5f   },
+				{ "Speed",                0.4f   },
+				{ "Wavedash",             0.5f   },	
+				{ "LandAllFours",         0.3f   },
+				{ "ConstantPenalty",     -0.4f   },
+				{ "VelocityTouch",         0.0f   },
+				{ "WallLaunch",            0.0f   },
+				{ "DoubleJumpBoost",       0.0f   },
+				{ "Whiff",                 0.0f   },
+				{ "BallTouchGround",       0.0f   },
 			},
 			.stochastic   = true,
 			.stateWeights = {
-				{ "Random",      0.0f },
 				{ "GoalShot",    1.0f },
 				{ "FallingBall", 0.0f },
 				{ "Pass",        0.0f },
+				{ "Random",      0.0f },
 			},
-			// Exemplo: alargar o raio de spawn do GoalShot nesta fase (params além do peso).
 			.stateParams = {
-				{ "GoalShot", { { "radius", 1600.f } } },
+				{ "GoalShot", { { "minHeight", 92.75f }, { "maxHeight", 550.f } } }, // range completo
 			},
 			.terminalActive = {
-				{ "BallTouch", false }, // desativa terminal de toque para permitir múltiplos toques e foco na direção},
+				{ "BallTouch", false },  // a partir daqui o win é GOLO
 				{ "NoTouch",   false },
 				{ "GoalScore", true  },
 				{ "Timeout",   true  },
 			},
+			.terminalParams = {
+				{ "Timeout", { { "seconds", 20.f } } },
+			},
 		},
 
-		// -------- Fase 3b: Pass — bola com velocidade dirigida ao carro --------
-		// Objetivo: temporizar o remate numa bola em movimento.
-		// A bola VEM ao carro → VelocityPlayerToBall irrelevante.
-		// Rewards: força do toque + direção pós-toque.
+		// -------- Fase 6: Passe baixo (valores normais) --------
+		// Bola vem ao carro com velocidade. Começa nos valores normais de altura.
 		TrainingPhase{
-			.name               = "3b-Pass",
+			.name               = "6-Passe-Baixo",
 			.advanceWinRate     = 0.80f,
 			.advanceItersNeeded = 8,
-
+ 
 			.rewardWeights = {
-				{ "VelocityPlayerToBall", 0.5f  },  // bola vem ao carro, pouca navegação necessária
-				{ "TouchAccel",           3.0f  },
-				{ "VelocityBallToGoal",   8.0f  },  // direção pós-toque é crítica
-				{ "GoalBonus",            150.0f},
-				{ "FaceBall",             0.5f  },
-				{ "LandAllFours",         0.3f  },
-				{ "Velocity",             0.2f  },
-				{ "Wavedash",                0.5f  },  // recompensa por wavedash, para incentivar movimentação avançada
-				{ "ConstantPenalty",     -0.4f  },
-				{ "Goal",                 0.0f  },
+				{ "GoalBonus",          400.0f   },
+				{ "VelocityBallToGoal",   8.0f   },  // direção pós-toque
+				{ "VelocityPlayerToBall", 0.5f   },  // bola vem ao carro
+				{ "FaceBall",             0.5f   },
+				{ "TouchBallAerial",      1.0f   },				
+				{ "TouchAccel",           3.0f   },
+				{ "StrongTouch",          1.0f   },		
+				{"HeightMatch",           5.0f   },		
+				{ "AerialDistance",       2.0f   },				
+				{ "Air",                  0.3f   },
+				{ "Speed",                0.2f   },
+				{ "Wavedash",             0.5f   },
+				{ "LandAllFours",         0.1f   },
+				{ "ConstantPenalty",     -0.4f   },
+				{ "VelocityTouch",         0.0f   },
+				{ "WallLaunch",            0.0f   },
+				{ "DoubleJumpBoost",       0.0f   },
+				{ "Whiff",                 0.0f   },
+				{ "BallTouchGround",       0.0f   },
 			},
 			.stochastic   = true,
 			.stateWeights = {
@@ -246,41 +489,101 @@ inline SchedulerConfig GetSchedulerConfig() {
 				{ "FallingBall", 0.0f },
 				{ "Pass",        1.0f },
 			},
+			.stateParams = {
+				{ "Pass", { { "minHeight", 300.f }, { "maxHeight", 900.f } } }, // normais
+			},
 			.terminalActive = {
 				{ "BallTouch", false },
 				{ "NoTouch",   false },
 				{ "GoalScore", true  },
 				{ "Timeout",   true  },
 			},
+			.terminalParams = {
+				{ "Timeout", { { "seconds", 20.f } } },
+			},
 		},
 
-		// -------- Fase 4: FallingBall — navegar e rematar --------
-		// Objetivo: aproximar-se de uma bola aleatória e marcar.
-		// A bola NÃO vem ao carro → VelocityPlayerToBall volta a ser importante.
-		// Rewards: aproximação + direção + golo.
+		// -------- Fase 7: Passe médio --------
+		// Sobe a altura do passe; mais ênfase aérea (alinhar no ar).
 		TrainingPhase{
-			.name               = "4-FallingBall",
+			.name               = "7-Passe-Medio",
+			.advanceWinRate     = 0.75f,
+			.advanceItersNeeded = 8,
+			.policyLR     = 1.5e-4f,  // refinar: baixar LR na consolidação
+			.criticLR     = 1.5e-4f,
+
+			.rewardWeights = {
+				{ "GoalBonus",          400.0f   },
+				{ "VelocityBallToGoal",   7.0f   },
+				{ "VelocityPlayerToBall", 0.5f   },
+				{ "FaceBall",             0.5f   },
+				{ "TouchBallAerial",      3.0f   },				
+				{ "TouchAccel",           1.0f   },
+				{ "StrongTouch",          0.2f   },				
+				{ "AerialDistance",       2.0f   },				
+				{ "Air",                  0.5f   },
+				{ "Speed",                0.2f   },
+				{ "Wavedash",             0.5f   },
+				{ "LandAllFours",         0.0f   },
+				{ "ConstantPenalty",     -0.4f   },
+				{ "VelocityTouch",         0.0f   },
+				{ "HeightMatch",           0.0f   },
+				{ "WallLaunch",            0.0f   },
+				{ "DoubleJumpBoost",       0.0f   },
+				{ "Whiff",                 0.0f   },
+				{ "BallTouchGround",       0.0f   },
+			},
+			.stochastic   = true,
+			.stateWeights = {
+				{ "Pass", 1.0f },
+			},
+			.stateParams = {
+				{ "Pass", { { "minHeight", 400.f }, { "maxHeight", 1050.f } } },
+			},
+			.terminalActive = {
+				{ "BallTouch", false },
+				{ "NoTouch",   false },
+				{ "GoalScore", true  },
+				{ "Timeout",   true  },
+			},
+			.terminalParams = {
+				{ "Timeout", { { "seconds", 20.f } } },
+			},
+		},
+
+		// -------- Fase 8: Passe alto (um pouco acima de metade do campo) --------
+		TrainingPhase{
+			.name               = "8-Passe-Alto",
 			.advanceWinRate     = 0.75f,
 			.advanceItersNeeded = 8,
 
 			.rewardWeights = {
-				{ "VelocityPlayerToBall", 4.0f  },  // navegar até à bola
-				{ "TouchAccel",        4.0f  },
-				{ "StrongTouch",          0.0f  },  // desativa — foco na navegação
-				{ "VelocityBallToGoal",   5.0f  },
-				{ "GoalBonus",            500.0f},
-				{ "GoalDistancePotential",2.0f  },
-			},
-			// Exemplo: ajustar a janela de velocidade do StrongTouch (params além do peso).
-			// Só tem efeito quando StrongTouch tiver peso > 0 nesta/noutra fase.
-			.rewardParams = {
-				{ "StrongTouch", { { "minSpeedKPH", 40.f }, { "maxSpeedKPH", 150.f } } },
+				{ "GoalBonus",          400.0f   },
+				{ "VelocityBallToGoal",   6.0f   },
+				{ "VelocityPlayerToBall", 0.5f   },
+				{ "FaceBall",             0.3f   },
+				{ "TouchBallAerial",      3.0f   },				
+				{ "TouchAccel",           1.0f   },
+				{ "StrongTouch",          0.2f   },				
+				{ "AerialDistance",       4.0f   },				
+				{ "Air",                  0.6f   },
+				{ "Speed",                0.2f   },
+				{ "Wavedash",             0.3f   },
+				{ "LandAllFours",         0.1f   },
+				{ "ConstantPenalty",     -0.4f   },
+				{ "VelocityTouch",         0.0f   },
+				{ "HeightMatch",           0.0f   },
+				{ "WallLaunch",            0.0f   },
+				{ "DoubleJumpBoost",       0.0f   },
+				{ "Whiff",                 0.0f   },
+				{ "BallTouchGround",       0.0f   },
 			},
 			.stochastic   = true,
 			.stateWeights = {
-				{ "GoalShot",    0.0f },
-				{ "FallingBall", 1.0f },
-				{ "Pass",        0.0f },
+				{ "Pass", 1.0f },
+			},
+			.stateParams = {
+				{ "Pass", { { "minHeight", 500.f }, { "maxHeight", 1200.f } } }, // ≈ acima de metade
 			},
 			.terminalActive = {
 				{ "BallTouch", false },
@@ -288,39 +591,178 @@ inline SchedulerConfig GetSchedulerConfig() {
 				{ "GoalScore", true  },
 				{ "Timeout",   true  },
 			},
+			.terminalParams = {
+				{ "Timeout", { { "seconds", 20.f } } },
+			},
 		},
 
-		// -------- Fase 5: consolidação chão --------
-		// Objetivo: generalizar os três estados. Rewards equilibradas.
+		// -------- Fase 9: FallingBall 70% + Passe 30% (ranges máximos) --------
+		// Navegar até bola alta a cair + temporizar passes. Maior range de alturas.
 		TrainingPhase{
-			.name               = "5-Consolidacao",
-			.advanceWinRate     = 0.80f,
+			.name               = "9-FallingBall+Passe",
+			.advanceWinRate     = 0.75f,
 			.advanceItersNeeded = 8,
 
 			.rewardWeights = {
-				{ "VelocityPlayerToBall", 2.0f  },
-				{ "TouchAccel",           3.0f  },
-				{ "VelocityBallToGoal",   4.0f  },
-				{ "GoalBonus",            500.0f},
+				{ "GoalBonus",          400.0f   },
+				{ "VelocityBallToGoal",   5.0f   },
+				{ "VelocityPlayerToBall", 2.0f   },  // navegar (FallingBall não vem ao carro)
+				{ "FaceBall",             0.3f   },
+				{ "TouchBallAerial",      3.0f   },				
+				{ "TouchAccel",           1.0f   },
+				{ "StrongTouch",          0.2f   },				
+				{ "AerialDistance",       4.0f   },				
+				{ "Air",                  0.6f   },
+				{ "Speed",                0.2f   },
+				{ "Wavedash",             0.3f   },
+				{ "LandAllFours",         0.1f   },
+				{ "ConstantPenalty",     -0.4f   },
+				{ "VelocityTouch",         0.0f   },
+				{ "HeightMatch",           0.0f   },
+				{ "WallLaunch",            0.0f   },
+				{ "DoubleJumpBoost",       0.0f   },
+				{ "Whiff",                 0.0f   },
+				{ "BallTouchGround",       0.0f   },
 			},
 			.stochastic   = true,
 			.stateWeights = {
-				{ "GoalShot",    0.2f },
+				{ "FallingBall", 0.7f },
 				{ "Pass",        0.3f },
-				{ "FallingBall", 0.5f },
+				{ "GoalShot",    0.0f },
+			},
+			.stateParams = {
+				{ "FallingBall", { { "minHeight", 400.f }, { "maxHeight", 1200.f } } }, // range máximo
+				{ "Pass",        { { "minHeight", 500.f }, { "maxHeight", 1200.f } } },
+			},
+			.terminalActive = {
+				{ "BallTouch", false },
+				{ "NoTouch",   false },
+				{ "GoalScore", true  },
+				{ "Timeout",   true  },
+			},
+			.terminalParams = {
+				{ "Timeout", { { "seconds", 20.f } } },
 			},
 		},
 
 		// ══════════════════════════════════════════════════════════════
-		// FASES AÉREAS
+		// BLOCO C — CONSOLIDAÇÃO (3 estados, ranges máximos de altura)
 		// ══════════════════════════════════════════════════════════════
 
-		// -------- Fase 6: tocar bola aérea --------
-		// Objetivo: chegar à bola enquanto no ar.
-		// Rewards: estar no ar + aproximação aérea + alinhar com a bola.
-		// Sem VelocityBallToGoal — foco total em CHEGAR à bola, não na direção.
+		// -------- Fase 10: consolidação a 20s --------
+		// GoalShot + Pass + FallingBall, todos no range máximo de altura. Timeout 20.
 		TrainingPhase{
-			.name               = "6-Aerio toque",
+			.name               = "10-Consolidacao-20",
+			.advanceWinRate     = 0.85f,
+			.advanceItersNeeded = 8,
+
+			.policyLR     = 1.0e-4f,  // refinar: baixar LR na consolidação
+			.criticLR     = 1.0e-4f,
+
+			.rewardWeights = {
+				{ "GoalBonus",          300.0f   },
+				{ "VelocityBallToGoal",   4.0f   },
+				{ "VelocityPlayerToBall", 2.0f   },
+				{ "FaceBall",             0.3f   },
+				{ "TouchBallAerial",      4.0f   },				
+				{ "TouchAccel",           1.0f   },
+				{ "StrongTouch",          0.3f   },				
+				{ "AerialDistance",       4.0f   },				
+				{ "Air",                  0.5f   },
+				{ "Speed",                0.2f   },
+				{ "Wavedash",             0.3f   },
+				{ "LandAllFours",         0.1f   },
+				{ "ConstantPenalty",     -0.3f   },
+				{ "VelocityTouch",         0.0f   },
+				{ "HeightMatch",           0.0f   },
+				{ "WallLaunch",            0.0f   },
+				{ "DoubleJumpBoost",       0.0f   },
+				{ "Whiff",                 0.0f   },
+				{ "BallTouchGround",       0.0f   },
+			},
+			.stochastic   = true,
+			.stateWeights = {
+				{ "GoalShot",    0.34f },
+				{ "Pass",        0.33f },
+				{ "FallingBall", 0.33f },
+			},
+			.stateParams = {
+				{ "GoalShot",    { { "minHeight", 92.75f }, { "maxHeight", 550.f  } } },
+				{ "Pass",        { { "minHeight", 300.f  }, { "maxHeight", 1200.f } } },
+				{ "FallingBall", { { "minHeight", 400.f  }, { "maxHeight", 1200.f } } },
+			},
+			.terminalActive = {
+				{ "BallTouch", false },
+				{ "NoTouch",   false },
+				{ "GoalScore", true  },
+				{ "Timeout",   true  },
+			},
+			.terminalParams = {
+				{ "Timeout", { { "seconds", 20.f } } },
+			},
+		},
+
+		// -------- Fase 11: consolidação final a 15s (permanente) --------
+		// Última fase: mesmo mix, timeout encurtado para 15s. Sem condição de avanço
+		// (advance* vazios) => fica aqui até ao fim do treino.
+		TrainingPhase{
+			.name         = "11-Consolidacao-15",
+
+			.policyLR     = 1.2e-4f,
+			.criticLR     = 1.2e-4f,
+			.gaeGamma	 = 0.995f,
+
+			.rewardWeights = {
+				{ "GoalBonus",          800.0f  },
+				{ "VelocityBallToGoal",   4.0f   },
+				{ "VelocityPlayerToBall", 2.0f   },
+				{ "FaceBall",             0.3f   },
+				{ "TouchBallAerial",      4.0f   },
+				{ "TouchAccel",           1.0f   },
+				{ "StrongTouch",          0.2f   },
+				{ "AerialDistance",       4.0f   },				
+				{ "Air",                  0.5f   },
+				{ "Speed",                0.2f   },
+				{ "Wavedash",             0.3f   },
+				{ "LandAllFours",         0.1f   },
+				{ "ConstantPenalty",     -0.4f   },
+				{ "VelocityTouch",         0.0f   },
+				{ "HeightMatch",           0.0f   },
+				{ "WallLaunch",            0.0f   },
+				{ "DoubleJumpBoost",       0.0f   },
+				{ "Whiff",                 0.0f   },
+				{ "BallTouchGround",       0.0f   },
+			},
+			.stochastic   = true,
+			.stateWeights = {
+				{ "GoalShot",    0.34f },
+				{ "Pass",        0.33f },
+				{ "FallingBall", 0.33f },
+			},
+			.stateParams = {
+				{ "GoalShot",    { { "minHeight", 92.75f }, { "maxHeight", 550.f  } } },
+				{ "Pass",        { { "minHeight", 300.f  }, { "maxHeight", 1200.f } } },
+				{ "FallingBall", { { "minHeight", 400.f  }, { "maxHeight", 1200.f } } },
+			},
+			.terminalActive = {
+				{ "BallTouch", false },
+				{ "NoTouch",   false },
+				{ "GoalScore", true  },
+				{ "Timeout",   true  },
+			},
+			.terminalParams = {
+				{ "Timeout", { { "seconds", 15.f } } },
+			},
+		},
+
+		// ══════════════════════════════════════════════════════════════
+		// TREINO AÉREO — COMENTADO (ativar quando o treino de chão estiver consolidado).
+		// Para reativar: descomenta e usa os state setters AirShot / StaticAerial / Cross.
+		// ══════════════════════════════════════════════════════════════
+		
+		// -------- Aéreo 1: tocar bola aérea --------
+		TrainingPhase{
+			.name               = "A1-Aerio toque",
 			.advanceWinRate     = 0.75f,
 			.advanceItersNeeded = 8,
 
@@ -331,23 +773,18 @@ inline SchedulerConfig GetSchedulerConfig() {
 			.gaeGamma     = 0.993f,
 
 			.rewardWeights = {
-				{ "Air",                  2.0f  },  // estar no ar
-				{ "AirCloserToBall",      5.0f  },  // aproximação aérea à bola
-				{ "AirAlignment",         3.0f  },  // alinhar corpo com bola
-				{ "VelocityPlayerToBall", 1.0f  },  // aproximação geral
-				{ "TouchAccel",        8.0f  },  // tocar a bola no ar
-				{ "VelocityBallToGoal",   0.0f  },  // ainda não importa a direção
-				{ "GoalBonus",            200.0f},  // bónus se marcar mas não é o foco
-				{ "GoalDistancePotential",0.0f  },
-				{ "StrongTouch",          0.0f  },
-				{ "ConstantPenalty",      -0.02f},  // pequena penalidade por ineficiência
+				{ "Air",                  2.0f  },
+				{ "AirAlignment",         3.0f  },
+				{ "VelocityPlayerToBall", 1.0f  },
+				{ "TouchAccel",           8.0f  },
+				{ "VelocityBallToGoal",   0.0f  },
+				{ "GoalBonus",          200.0f  },
+				{ "ConstantPenalty",     -0.02f },
 			},
 			.stochastic   = true,
 			.stateWeights = {
-				{ "GoalShot",     0.0f },
 				{ "FallingBall",  0.3f },
 				{ "StaticAerial", 0.7f },
-				{ "Pass",         0.0f },
 			},
 			.terminalActive = {
 				{ "NoTouch",   false },
@@ -356,36 +793,32 @@ inline SchedulerConfig GetSchedulerConfig() {
 			},
 		},
 
-		// -------- Fase 7: marcar aéreo --------
-		// Objetivo: tocar a bola no ar E direcioná-la para a baliza.
-		// Rewards: aproximação aérea + direção pós-toque + golo.
+		// -------- Aéreo 2: marcar aéreo --------
 		TrainingPhase{
-			.name               = "7-Aerio marcar",
+			.name               = "A2-Aerio marcar",
 			.advanceWinRate     = 0.65f,
 			.advanceItersNeeded = 8,
 
 			.rewardWeights = {
 				{ "Air",                  1.0f  },
-				{ "AirCloserToBall",      3.0f  },
 				{ "AirAlignment",         2.0f  },
 				{ "VelocityPlayerToBall", 0.5f  },
-				{ "TouchAccel",        5.0f  },
-				{ "VelocityBallToGoal",   6.0f  },  // NOVO: direção à baliza
-				{ "GoalBonus",            800.0f},  // marcar é agora o objetivo
-				{ "ConstantPenalty",      -0.02f},
+				{ "TouchAccel",           5.0f  },
+				{ "VelocityBallToGoal",   6.0f  },
+				{ "GoalBonus",          800.0f  },
+				{ "ConstantPenalty",     -0.02f },
 			},
 			.stochastic   = true,
 			.stateWeights = {
 				{ "FallingBall",  0.1f },
 				{ "StaticAerial", 0.1f },
-				{ "Cross",        0.8f },  // cross: ângulo + velocidade
+				{ "Cross",        0.8f },
 			},
 		},
 
-		// -------- Fase 8: aperfeiçoamento --------
-		// Objetivo: consolidar tudo. Rewards equilibradas para não regredir.
+		// -------- Aéreo 3: aperfeiçoamento --------
 		TrainingPhase{
-			.name         = "8-Aperfeicoamento",
+			.name         = "A3-Aperfeicoamento",
 			.policyLR     = 0.8e-4f,
 			.criticLR     = 0.8e-4f,
 			.entropyScale = 0.025f,
@@ -394,24 +827,23 @@ inline SchedulerConfig GetSchedulerConfig() {
 
 			.rewardWeights = {
 				{ "Air",                  0.5f  },
-				{ "AirCloserToBall",      1.0f  },
 				{ "AirAlignment",         1.0f  },
 				{ "VelocityPlayerToBall", 0.5f  },
 				{ "TouchAccel",           2.0f  },
 				{ "VelocityBallToGoal",   2.0f  },
-				{ "GoalBonus",            1000.0f},
+				{ "GoalBonus",         1000.0f  },
 				{ "WallLaunch",           1.0f  },
-				{ "ConstantPenalty",      -0.02f},
+				{ "ConstantPenalty",     -0.02f },
 			},
 			.stochastic   = true,
 			.stateWeights = {
-				{ "FallingBall",  0.0f },
 				{ "StaticAerial", 0.1f },
 				{ "Cross",        0.5f },
 				{ "WallDrag",     0.3f },
 				{ "Random",       0.1f },
 			},
-		}
+		},
+		*/
 	};
 
 	return cfg;

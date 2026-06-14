@@ -9,13 +9,15 @@ void RLGC::FallingBallApproachState::ResetArena(Arena* arena) {
 
 	// Bola: meio campo adversário (Y > 0 para Blue), cai por gravidade sem impulso inicial
 	float ballX = RandFloat(-1500.f, 1500.f);
-	float ballY = RandFloat(1500.f, 3500.f);  // centro do meio campo adversário ≈ Y 2560
-	float ballZ = RandFloat(400.f, 700.f);    // alcançável com um salto simples, não aerial
+	float ballY = RandFloat(1500.f, 3500.f);       // centro do meio campo adversário ≈ Y 2560
+	float ballZ = RandFloat(minHeight, maxHeight); // alcançável com um salto simples (default 400..700)
 
 	{
 		BallState bs = {};
 		bs.pos    = Vec(ballX, ballY, ballZ);
-		bs.vel    = Vec(0.f, 0.f, RandFloat(-300.f, -100.f)); // cai desde o início
+		// Pequena velocidade horizontal em X com orientação (sinal) aleatória — leve deriva lateral
+		float xDrift = RandFloat(-100.f, 100.f);
+		bs.vel    = Vec(xDrift, 0.f, RandFloat(-300.f, -100.f)); // cai desde o início, com leve deriva em X
 		bs.angVel = Vec(0.f, 0.f, 0.f);
 		arena->ball->SetState(bs);
 	}

@@ -1,5 +1,5 @@
 #pragma once
-#include "SchedulerConfig.h"
+#include "SchedulerTypes.h"   // só precisa dos tipos (TrainingPhase, SchedulerConfig), não da data
 #include <vector>
 #include <cstdint>
 

@@ -326,6 +326,16 @@ void Scheduler::ApplyPhaseWeights(Learner* learner, const TrainingPhase& p) {
 		for (auto& [name, active] : p.terminalActive)
 			printf("[Scheduler]     %-16s -> %s\n", name.c_str(), active ? "ON" : "OFF");
 	}
+
+	if (!p.terminalParams.empty()) {
+		for (auto& [arena, st] : arenaToTerminal)
+			st->SetParams(p.terminalParams);
+
+		printf("[Scheduler]   Terminal params atualizados:\n");
+		for (auto& [tname, params] : p.terminalParams)
+			for (auto& [key, value] : params)
+				printf("[Scheduler]     %-16s . %-12s = %g\n", tname.c_str(), key.c_str(), value);
+	}
 }
 
 void Scheduler::ApplyPPO(Learner* learner, uint64_t ts, int phaseIdx) {

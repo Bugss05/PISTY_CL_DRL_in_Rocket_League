@@ -51,6 +51,18 @@ public:
 		}
 	}
 
+	// Atualização PARCIAL de parâmetros: para cada condição cujo nome está no mapa,
+	// encaminha cada (param -> valor) para TerminalCondition::SetParam (ex.: Timeout "seconds").
+	void SetParams(const std::unordered_map<std::string, std::unordered_map<std::string, float>>& params) {
+		for (auto& e : entries) {
+			auto it = params.find(e.name);
+			if (it == params.end())
+				continue;
+			for (auto& [key, value] : it->second)
+				e.cond->SetParam(key, value);
+		}
+	}
+
 	void Reset(const RLGC::GameState& initialState) override {
 		for (auto& e : entries)
 			e.cond->Reset(initialState);

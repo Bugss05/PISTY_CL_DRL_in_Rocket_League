@@ -25,5 +25,11 @@ namespace RLGC {
 		virtual bool IsTruncation() override {
 			return true;
 		}
+
+		// Schedulable param: "seconds" (= maxTime, em segundos). Permite ao Scheduler
+		// encurtar o episódio por fase (ex.: 40 -> 30 -> 20 -> 15).
+		virtual void SetParam(const std::string& key, float value) override {
+			if (key == "seconds" || key == "maxTime") maxTime = value;
+		}
 	};
 }

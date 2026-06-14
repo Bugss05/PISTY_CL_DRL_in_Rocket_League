@@ -10,8 +10,8 @@ void RLGC::StaticAerialState::ResetArena(Arena* arena) {
 	// Bola parada no ar a altura de aerial (não flip reset)
 	// Flip reset seria Z≈17-100; aerial começa a partir de ~500
 	float ballX = RandFloat(-2000.f, 2000.f);
-	float ballY = RandFloat(0.f, 4000.f);    // meio campo adversário
-	float ballZ = RandFloat(600.f, 1500.f);  // altura de aerial claro: salto + aerial
+	float ballY = RandFloat(0.f, 4000.f);          // meio campo adversário
+	float ballZ = RandFloat(minHeight, maxHeight); // altura de aerial (default 600..1500)
 
 	{
 		BallState bs = {};

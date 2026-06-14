@@ -106,12 +106,32 @@ namespace RLGC {
 	// https://github.com/AechPro/rocket-league-gym-sim/blob/main/rlgym_sim/utils/reward_functions/common_rewards/player_ball_rewards.py
 	class FaceBallReward : public Reward {
 	public:
+		float retreatScale; // peso da penalização por se afastar (multiplica a vel de recuo normalizada)
+
+		// Enquanto se APROXIMA da bola, dá o "apontar à bola" normal (forward · dirToBall).
+		// Quando se AFASTA, em vez de 0 leva penalização proporcional à velocidade de recuo.
+		// Assim deixa de compensar recuar para estabilizar o apontar perto da bola.
+		FaceBallReward(float retreatScale = 1.0f) : retreatScale(retreatScale) {}
+
+		// Schedulable param: "retreatScale" (intensidade da penalização por recuar).
+		virtual void SetParam(const std::string& key, float value) override {
+			if (key == "retreatScale") retreatScale = value;
+		}
+
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) {
 			Vec diff = state.ball.pos - player.pos;
 			float dist = diff.Length();
 			if (dist < 1e-6f) return 0.0f;
 			Vec dirToBall = diff / dist;
-			return player.rotMat.forward.Dot(dirToBall);
+
+			float faceDot  = player.rotMat.forward.Dot(dirToBall); // [-1,1] apontar à bola
+			float approach = player.vel.Dot(dirToBall);            // >0 aproxima, <0 afasta
+
+			if (approach >= 0.0f)
+				return faceDot;                                    // a aproximar-se: FaceBall normal
+
+			// a afastar-se: penaliza (negativo) proporcional à velocidade de recuo, em vez de 0
+			return retreatScale * (approach / CommonValues::CAR_MAX_SPEED);
 		}
 	};
 
@@ -144,6 +164,37 @@ namespace RLGC {
 			if (!wasOnGround && isOnGround) {
 				return penalty;
 			}
+			return 0.0f;
+		}
+	};
+
+	// Penaliza WHIFFS: o carro chega muito perto da bola e AFASTA-SE sem lhe tocar (falhou o toque).
+	// Binário, SEM escalas: devolve 1.0 no instante do whiff, 0 caso contrário.
+	// É um castigo -> dá-lhe um PESO NEGATIVO no SchedulerConfig (como o ConstantPenalty).
+	class WhiffReward : public Reward {
+	public:
+		float whiffDist; // distância (uu) abaixo da qual se considera "esteve perto o suficiente para tocar"
+
+		WhiffReward(float whiffDist = 250.0f) : whiffDist(whiffDist) {}
+
+		// Schedulable param: "whiffDist".
+		virtual void SetParam(const std::string& key, float value) override {
+			if (key == "whiffDist") whiffDist = value;
+		}
+
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			if (!player.prev || !state.prev) return 0.0f;
+
+			// Não conta se tocou agora ou no passo anterior (afastar-se após o toque não é whiff)
+			if (player.ballTouchedStep || player.prev->ballTouchedStep) return 0.0f;
+
+			float distNow  = (state.ball.pos - player.pos).Length();
+			float distPrev = (state.prev->ball.pos - player.prev->pos).Length();
+
+			// Whiff = esteve dentro de whiffDist e agora está a AFASTAR-SE sem ter tocado
+			if (distPrev < whiffDist && distNow > distPrev)
+				return 1.0f;
+
 			return 0.0f;
 		}
 	};
@@ -202,8 +253,66 @@ namespace RLGC {
 
 	class AirReward : public Reward {
 	public:
+		float minSpeed; // velocidade HORIZONTAL mínima (uu/s) para contar (ignora eixo vertical)
+
+		// Só premeia estar no ar se houver deslocação horizontal considerável — evita que
+		// o bot salte no sítio só para farmar a reward sem ir ter com a bola.
+		AirReward(float minSpeed = 800.f) : minSpeed(minSpeed) {}
+
+		// Schedulable param: "minSpeed" (uu/s, velocidade horizontal mínima).
+		virtual void SetParam(const std::string& key, float value) override {
+			if (key == "minSpeed") minSpeed = value;
+		}
+
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-			return !player.isOnGround;
+			if (player.isOnGround)
+				return 0.0f;
+
+			// Velocidade horizontal (XY), ignora a componente vertical (saltar para cima não conta)
+			float horizSpeed = sqrtf(player.vel.x * player.vel.x + player.vel.y * player.vel.y);
+			return (horizSpeed >= minSpeed) ? 1.0f : 0.0f;
+		}
+	};
+
+	// EXPERIMENTAL: incentiva a técnica de double jump + boost dirigido à bola — como os
+	// jogadores fazem para chegar a aéreos mais depressa (dois saltos com boost intermitente).
+	// Só conta quando TODAS se verificam:
+	//   - está no ar e JÁ fez double jump (hasDoubleJumped; flips NÃO contam)
+	//   - está a premir boost (input prevAction.boost == 1; deteta o INPUT, não o consumo,
+	//     porque com boostUsedPerSecond = 0 o boost é infinito e nunca diminui)
+	//   - tem velocidade horizontal considerável (gate tipo AirReward, p/ não spamar boost só p/ cima)
+	// Escala pela velocidade EM DIREÇÃO à bola (quanto mais depressa vai para a bola, maior).
+	class DoubleJumpBoostReward : public Reward {
+	public:
+		float minSpeed; // gate de velocidade horizontal (uu/s), como o AirReward
+
+		DoubleJumpBoostReward(float minSpeed = 800.f) : minSpeed(minSpeed) {}
+
+		// Schedulable param: "minSpeed" (uu/s, velocidade horizontal mínima).
+		virtual void SetParam(const std::string& key, float value) override {
+			if (key == "minSpeed") minSpeed = value;
+		}
+
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			if (player.isOnGround) return 0.0f;
+			if (!player.hasDoubleJumped) return 0.0f;          // precisa do 2º salto (flip não conta)
+
+			// Está a premir boost? (input, não consumo — boost é infinito neste setup)
+			if (player.prevAction.boost < 0.5f) return 0.0f;
+
+			// Gate tipo AirReward: velocidade horizontal considerável (exclui boost só para cima)
+			float horizSpeed = sqrtf(player.vel.x * player.vel.x + player.vel.y * player.vel.y);
+			if (horizSpeed < minSpeed) return 0.0f;
+
+			// Escala pela velocidade EM DIREÇÃO à bola
+			Vec diff = state.ball.pos - player.pos;
+			float dist = diff.Length();
+			if (dist < 1e-6f) return 0.0f;
+			Vec dirToBall = diff / dist;
+			float approach = player.vel.Dot(dirToBall);        // >0 = a ir para a bola
+			if (approach <= 0.0f) return 0.0f;
+
+			return approach / CommonValues::CAR_MAX_SPEED;      // [0,1], maior quanto mais rápido p/ a bola
 		}
 	};
 
@@ -405,24 +514,43 @@ namespace RLGC {
 
 	class HeightMatchReward : public Reward {
 	public:
+		float proximityDist; // distância horizontal (uu) a partir da qual a reward começa a contar
+		float heightRange;   // diferença de altura (uu) a partir da qual a reward é 0
+		float minBallHeight; // altura mínima da bola (uu) para a reward contar (no chão não conta)
+
 		/**
 		 * Incentivizes the player to match the ball's height (Z-axis) as they get closer horizontally.
 		 * This helps prevent "whiffing" by flying over or under the ball.
+		 * proximityDist: só conta quando dist2D < proximityDist (mais pequeno = mais apertado).
+		 * minBallHeight: só conta quando a bola está acima desta altura (no chão igualar altura é trivial).
 		 */
+		HeightMatchReward(float proximityDist = 800.f, float heightRange = 1000.f, float minBallHeight = 200.f)
+			: proximityDist(proximityDist), heightRange(heightRange), minBallHeight(minBallHeight) {}
+
+		// Schedulable params: "proximityDist", "heightRange", "minBallHeight" (mesmas unidades do construtor).
+		virtual void SetParam(const std::string& key, float value) override {
+			if (key == "proximityDist")      proximityDist = value;
+			else if (key == "heightRange")   heightRange   = value;
+			else if (key == "minBallHeight") minBallHeight = value;
+		}
+
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			// Só conta com a bola acima do chão (no chão igualar altura é trivial)
+			if (state.ball.pos.z < minBallHeight)
+				return 0.0f;
+
 			// Calculate horizontal distance (XY plane only)
 			float dist2D = (Vec(player.pos.x, player.pos.y, 0) - Vec(state.ball.pos.x, state.ball.pos.y, 0)).Length();
-			
+
 			// Calculate height difference
 			float heightDiff = fabsf(player.pos.z - state.ball.pos.z);
-			
-			// We only care about height matching when the player is relatively close (e.g., within 1500 units)
-			float proximityFactor = RS_CLAMP(1.0f - (dist2D / 1500.0f), 0.0f, 1.0f);
-			
+
+			// Só conta quando o jogador está perto na horizontal (default: dentro de 800 uu)
+			float proximityFactor = RS_CLAMP(1.0f - (dist2D / proximityDist), 0.0f, 1.0f);
+
 			// Reward is higher when heightDiff is small and proximity is high
-			// Max height of the arena is ~2000
-			float heightFactor = RS_CLAMP(1.0f - (heightDiff / 1000.0f), 0.0f, 1.0f);
-			
+			float heightFactor = RS_CLAMP(1.0f - (heightDiff / heightRange), 0.0f, 1.0f);
+
 			return proximityFactor * heightFactor;
 		}
 	};
@@ -744,6 +872,14 @@ namespace RLGC {
 
 	class GoalBonusReward : public Reward {
 	public:
+		float concedeScale; // multiplicador do castigo ao marcar na PRÓPRIA baliza (-1 = simétrico; 0 = sem castigo)
+		GoalBonusReward(float concedeScale = -1.0f) : concedeScale(concedeScale) {}
+
+		// Schedulable param: "concedeScale" (ex.: -0.3 reduz o medo de auto-golo, 0 remove-o).
+		virtual void SetParam(const std::string& key, float value) override {
+			if (key == "concedeScale") concedeScale = value;
+		}
+
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
 			if (!state.goalScored)
 				return 0;
@@ -776,9 +912,9 @@ namespace RLGC {
 			float bonus = speedBonus * 1.0f + cornerBonus * 0.25f; // up to 0.5
 
 			baseReward += bonus;
-			// Give +bonus to scoring players, -bonus to others (zero-sum)
+			// Give +bonus to scoring players, concedeScale*bonus to others (zero-sum)
 			bool scored = (player.team != RS_TEAM_FROM_Y(state.ball.pos.y));
-			return scored ? baseReward : -baseReward;
+			return scored ? baseReward : concedeScale * baseReward;
 
 			// this reward is [0, 1.5]. if we want to keep between [0, 1] we can divide by 1.5, 
 			// but I think it's fine to have some rewards above 1 as long as they are not too high 

@@ -9,9 +9,17 @@ void RLGC::GoalShotState::ResetArena(Arena* arena) {
 	float ballX = RandFloat(-890.f, 890.f);
 	float ballY = 5020.f;
 
+	// Limite duro: a bola nunca pode ficar acima da barra, senão passa por cima do golo
+	// ("phase") e não conta como golo. Topo da bola <= GOAL_HEIGHT  =>  centro <= GOAL_HEIGHT - BALL_RADIUS.
+	float crossbarLimit = CommonValues::GOAL_HEIGHT - CommonValues::BALL_RADIUS; // ≈ 550
+	float hiZ = maxHeight < crossbarLimit ? maxHeight : crossbarLimit;
+	float loZ = minHeight < hiZ ? minHeight : hiZ;
+	if (loZ < CommonValues::BALL_RADIUS) loZ = CommonValues::BALL_RADIUS; // não enterrar a bola no chão
+	float ballZ = RandFloat(loZ, hiZ);
+
 	{ // Set up the ball
 		BallState bs = {};
-		bs.pos = Vec(ballX, ballY, CommonValues::BALL_RADIUS);
+		bs.pos = Vec(ballX, ballY, ballZ);
 		bs.vel = Vec(0, 0, 0);
 		bs.angVel = Vec(0, 0, 0);
 		arena->ball->SetState(bs);

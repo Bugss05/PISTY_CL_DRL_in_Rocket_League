@@ -10,8 +10,8 @@ void RLGC::PassState::ResetArena(Arena* arena) {
 
 	// Bola: meia altura, velocidade horizontal que simula um passe
 	float ballX = RandFloat(-2000.f, 2000.f);
-	float ballY = RandFloat(0.f, 4000.f);     // meio campo adversário
-	float ballZ = RandFloat(300.f, 900.f);    // meia altura
+	float ballY = RandFloat(0.f, 4000.f);          // meio campo adversário
+	float ballZ = RandFloat(minHeight, maxHeight); // meia altura (default 300..900)
 
 	{
 		BallState bs = {};

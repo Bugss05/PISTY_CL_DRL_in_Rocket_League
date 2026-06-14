@@ -5,6 +5,9 @@ Just replace this with your original examplemain.cpp file in your GigalearnCPP-L
 #include <GigaLearnCPP/Learner.h>
 #include "config.h"
 
+#include <ctime>
+#include <string>
+
 #include <RLGymCPP/Rewards/CommonRewards.h>
 #include <RLGymCPP/Rewards/ZeroSumReward.h>
 #include <RLGymCPP/TerminalConditions/NoTouchCondition.h>
@@ -53,7 +56,7 @@ EnvCreateResult EnvCreateFunc(int index) {
     struct NamedReward { std::string name; Reward* reward; float weight; };
     std::vector<NamedReward> namedRewards = {
         // --- Golo / Bola ---
-        { "Goal",                    new ZeroSumReward(new GoalReward(), 1.0f, 1.0f),0.0f },
+        // { "Goal",                    new ZeroSumReward(new GoalReward(), 1.0f, 1.0f),0.0f },
         { "GoalBonus",               new ZeroSumReward(new GoalBonusReward(), 1.0f, 1.0f), 0.0f}, // bónus por velocidade + canto
         { "VelocityBallToGoal",      new VelocityBallToGoalReward(false),      0.0f },
         //{ "GoalDistancePotential",   new GoalDistancePotentialReward(),        0.0f }, // reward shaping por aproximação da bola ao golo
@@ -76,20 +79,22 @@ EnvCreateResult EnvCreateFunc(int index) {
         { "VelocityTouch",           new VelocityTouchReward(),                0.0f }, // toque com scale pela velocidade do jogador [0,1]
         { "TouchAccel",              new TouchAccelReward(),                   0.0f }, // acelera bola até 110 km/h
         { "StrongTouch",             new StrongTouchReward(),                  0.0f }, // toque forte (20–130 km/h)
+        { "Whiff",                   new WhiffReward(),                        0.0f }, // CASTIGO: chegar perto e falhar o toque (peso NEGATIVO no scheduler)
         //{ "FlipReset",               new FlipResetReward(),                    0.0f }, // toque invertido no ar
 
         // --- Aéreo ---
-        { "AirAlignment",            new AirAlignmentReward(),                 0.0f },
+        //{ "AirAlignment",            new AirAlignmentReward(),                 0.0f },
         { "AerialDistance",          new AerialDistanceReward(),               0.0f },
-        { "AirCloserToBall",         new AirCloserToBallReward(),              0.0f }, // aproximação aérea à bola
+        //{ "AirCloserToBall",         new AirCloserToBallReward(),              0.0f }, // aproximação aérea à bola
         { "HeightMatch",             new HeightMatchReward(),                  0.0f }, // igualar altura da bola
         //{ "AirDribble",              new AirDribbleReward(),                   0.0f }, // toques consecutivos no ar
         { "WallLaunch",              new WallLaunchReward(),                   0.0f }, // salto da parede lateral
         { "Air",                     new AirReward(),                          0.0f },
+        { "DoubleJumpBoost",         new DoubleJumpBoostReward(),              0.0f }, // EXPERIMENTAL: double jump + boost dirigido à bola
 
         // --- Velocidade / Boost ---
         { "Speed",                   new SpeedReward(),                        0.0f },
-        { "Velocity",                new VelocityReward(),                     0.0f },
+        //{ "Velocity",                new VelocityReward(),                     0.0f },
         //{ "SaveBoost",               new SaveBoostReward(),                    0.0f },
         //{ "PickupBoost",             new PickupBoostReward(),                  0.0f },
         { "Wavedash",                new WavedashReward(),                     0.0f },
@@ -103,7 +108,7 @@ EnvCreateResult EnvCreateFunc(int index) {
 
         // --- Penalidades ---
         { "ConstantPenalty",         new ConstantReward(),                    -0.0f },
-        //{ "BallTouchGround",         new BallTouchGroundPenalty(-10.0f),       0.00f },
+        { "BallTouchGround",         new BallTouchGroundPenalty(-10.0f),       0.00f },
         //{ "CmonDoSomething",         new CmonDoSomethingReward(),              0.0f }, // penaliza inatividade (quadrática)
         //{ "TeremMoffi",              new TeremMoffiReward(),                   0.0f }, // penaliza demora a marcar (log)
         //{ "ActionSmoothing",         new ActionSmoothingPenalty(),             0.0f }, // penaliza inputs bruscos
@@ -145,12 +150,18 @@ EnvCreateResult EnvCreateFunc(int index) {
     // SchedulerConfig.h (stateWeights). O Scheduler muda estes pesos por fase em runtime.
     SchedulableState* combinedSetter = new SchedulableState({
         { "AirShot",      new AirShotState(),                    0.0f }, // Foco principal em remates aéreos!
-        { "GoalShot",     new GoalShotState(1600),               0.0f },
+        // GoalShotState(radius, minHeight, maxHeight) — defaults: radius=1000, altura 92.75..550.
+        // maxHeight é limitado à barra (GOAL_HEIGHT - BALL_RADIUS ≈ 550): acima disso a bola passa
+        // por cima do golo ("phase") e não conta — por isso o teto fica sempre abaixo da barra.
+        { "GoalShot",     new GoalShotState(1600, 92.75f, 550.f), 0.0 }, // radius alargado p/ 1600; altura no chão até abaixo da barra
         { "Random",       new RandomState(true,false,true),      0.0f },
-        { "FallingBall",  new FallingBallApproachState(),        0.4f }, // Bola a cair no meio campo adversário, carro no chão
-        { "Pass",         new PassState(),                       0.0f }, // Passe: bola a meia altura com vel horizontal, carro aleatório
+        // FallingBallApproachState(minHeight, maxHeight) — defaults: altura 400..700 (salto simples)
+        { "FallingBall",  new FallingBallApproachState(400.f, 700.f), 1.0f }, // Bola a cair no meio campo adversário, carro no chão
+        // PassState(minHeight, maxHeight) — defaults: altura 300..900 (meia altura)
+        { "Pass",         new PassState(300.f, 900.f),           0.0f }, // Passe: bola a meia altura com vel horizontal, carro aleatório
         { "Kickoff",      new KickoffState(),                    0.0f },
-        { "StaticAerial", new StaticAerialState(),               0.0f },
+        // StaticAerialState(minHeight, maxHeight) — defaults: altura 600..1500 (altura de aerial)
+        { "StaticAerial", new StaticAerialState(600.f, 1500.f),  0.0f },
         { "Cross",        new CrossState(),                      0.0f },
         { "WallDrag",     new WallDragState(),                   0.0f },
     }, /*stochastic*/ true); // pesos iniciais; o Scheduler sobrepõe-se conforme a fase
@@ -225,7 +236,7 @@ int main(int argc, char* argv[]) {
     cfg.ppo.gaeGamma = 0.99f; //start with .99, then up to .993 once it can hit ball and shoot ball on net, then .995 once it learns dribbles and powershots, .997 once it gets better than necto.
     cfg.ppo.policyLR = 2e-4f;
     cfg.ppo.criticLR = 2e-4f; //learning rates. start out high, then lower to 1.5e-4 when it learns to shoot and touch ball, then 1e-4 once it learns dribbles, then 0.8e-4 once it is around nexto level.
-    cfg.ppo.sharedHead.layerSizes = { 1024, 1024, 1024 }; // power-of-2 → kernels GPU ideais; 768 = 3×256, desalinhado, throughput pior
+    cfg.ppo.sharedHead.layerSizes = { 512,512,512 }; // power-of-2 → kernels GPU ideais; 768 = 3×256, desalinhado, throughput pior
     cfg.ppo.policy.layerSizes = { 256, 256, 256 };
     cfg.ppo.critic.layerSizes = { 256, 256, 256 }; //these are pretty good, DO NOT INCREASE IT FURTHER
 
@@ -267,6 +278,24 @@ int main(int argc, char* argv[]) {
     }
 
     cfg.randomSeed = 123; // use -1 for random seed for viewing, this doesnt matter tho
+
+    // -------- Nome da run no Weights & Biases --------
+    // ESCOLHE O NOME AQUI. A data + hora (até à hora, sem minutos) é acrescentada automaticamente.
+    // Resultado, ex.: "remates-altos_2026-06-14_15h"
+    {
+        std::string runName = "minha-run"; // <-- muda só isto para cada nova run
+
+        std::time_t t = std::time(nullptr);
+        std::tm tm_buf;
+#ifdef _WIN32
+        localtime_s(&tm_buf, &t);
+#else
+        localtime_r(&t, &tm_buf);
+#endif
+        char stamp[32];
+        std::strftime(stamp, sizeof(stamp), "%Y-%m-%d_%Hh", &tm_buf); // data + hora apenas
+        cfg.metricsRunName = runName + "_" + stamp;
+    }
 
     Learner* learner = new Learner(EnvCreateFunc, cfg, StepCallback);
     learner->Start(); // START LEARNING BOYYYSSS
