@@ -5,6 +5,8 @@
 
 namespace RLGC {
 
+using RocketSim::Math::RandFloat;
+
 // Envolve um state setter de cenário (FallingBall, Pass, Cross, ...) e
 // reposiciona o carro ORANGE como DEFENSOR, de forma específica ao cenário.
 //
@@ -51,9 +53,9 @@ public:
 
 			if (mode == GOAL) {
 				// Guarda-redes: junto à linha de golo laranja, dentro da baliza.
-				x   = Math::RandFloat(-700.f, 700.f);          // largura da baliza (±892) com margem
-				y   = Math::RandFloat(4600.f, 5100.f);         // junto à linha de golo (+5120)
-				yaw = -(float)M_PI / 2.f + Math::RandFloat(-0.30f, 0.30f); // vira para -Y (campo)
+				x   = RandFloat(-700.f, 700.f);          // largura da baliza (±892) com margem
+				y   = RandFloat(4600.f, 5100.f);         // junto à linha de golo (+5120)
+				yaw = -(float)M_PI / 2.f + RandFloat(-0.30f, 0.30f); // vira para -Y (campo)
 			} else { // BEHIND_BALL
 				// Defensor na trajetória horizontal da bola, bem à frente dela.
 				Vec flat = Vec(ballVel.x, ballVel.y, 0.f);
@@ -61,8 +63,8 @@ public:
 				if (flat.Length() < 100.f) dir = Vec(0.f, 1.f, 0.f); // bola quase parada -> assume +Y
 				else                       dir = flat.Normalized();
 
-				float dist = Math::RandFloat(1500.f, 2600.f);  // consideravelmente à frente da bola
-				x = ballPos.x + dir.x * dist + Math::RandFloat(-700.f, 700.f); // X variado
+				float dist = RandFloat(1500.f, 2600.f);  // consideravelmente à frente da bola
+				x = ballPos.x + dir.x * dist + RandFloat(-700.f, 700.f); // X variado
 				y = ballPos.y + dir.y * dist;
 
 				// Mantém dentro do campo, sem encostar à baliza
@@ -79,7 +81,7 @@ public:
 			cs.vel    = {};
 			cs.angVel = {};
 			cs.rotMat = Angle(yaw, 0.f, 0.f).ToRotMat();
-			cs.boost  = Math::RandFloat(20.f, 50.f); // boost limitado, realista
+			cs.boost  = RandFloat(20.f, 50.f); // boost limitado, realista
 
 			car->SetState(cs);
 		}

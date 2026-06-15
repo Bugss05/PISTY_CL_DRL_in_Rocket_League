@@ -37,18 +37,20 @@ inline std::vector<Phase> GetPhases() {
             "Bronze-Tocar",
             /* startTimesteps */ 0,
             /* rewardWeights  */ {
-                { "GoalBonus",            100.0f  },  // pequeno mas sempre presente — marcar é o objetivo
-                { "VelocityBallToGoal",   3.0f  },  // bola a mover-se para o golo — sinal de direção
-                { "TouchAccel",           10.0f  },  // sinal dominante: toca na bola!
-                { "StrongTouch",          3.0f  },
-                { "VelocityTouch",        1.0f  },
-                { "VelocityPlayerToBall", 0.5f  },
-                { "FaceBall",             0.1f  },
+                // Guia (early stage): SÓ tocar na bola + não esquecer de saltar.
+                // SEM rewards de golo nem bola->golo — só adicionam ruído agora.
+                { "GoalBonus",            0.0f  },  // guia: nada de golo no early stage
+                { "VelocityBallToGoal",   0.0f  },  // guia: nada de bola->golo no early stage
+                { "TouchAccel",           50.0f },  // recompensa GIGANTE por tocar (domina tudo)
+                { "StrongTouch",          0.0f  },  // força do toque é middle-stage
+                { "VelocityTouch",        0.0f  },
+                { "VelocityPlayerToBall", 5.0f  },  // mover-se para a bola
+                { "FaceBall",             1.0f  },  // não conduzir de costas para a bola
                 { "Air",                  0.15f },  // NAO ESQUECER DE SALTAR
                 { "AerialDistance",       0.0f  },
                 { "TouchBallAerial",      0.0f  },
                 { "WallLaunch",           0.0f  },
-                { "Speed",                0.2f },
+                { "Speed",                0.0f  },
                 { "Whiff",                0.0f  },
             },
             /* stateWeights */ {
@@ -75,19 +77,21 @@ inline std::vector<Phase> GetPhases() {
             "Gold-GoloEPasse",
             /* startTimesteps */ 400'000'000,
             /* rewardWeights  */ {
-                { "GoalBonus",            100.0f  },  // moderado — nunca massivo
-                { "VelocityBallToGoal",   3.0f  },  // mais forte que VelocityPlayerToBall
-                { "TouchAccel",           2.0f  },  // reduzido: tocar já não é prioridade
-                { "StrongTouch",          6.0f  },
+                // Guia (learning to score): baixar MUITO o touch, golo MODERADO (~20, nunca 100),
+                // VelocityBallToGoal "a fair bit stronger" que VelocityPlayerToBall.
+                { "GoalBonus",            20.0f },  // guia: ~20 é razoável; 100 afoga tudo
+                { "VelocityBallToGoal",   5.0f  },  // bem mais forte que VelocityPlayerToBall
+                { "TouchAccel",           5.0f  },  // reduzido (era dominante na fase 0)
+                { "StrongTouch",          4.0f  },  // começa a premiar powershots
                 { "VelocityTouch",        0.0f  },
-                { "VelocityPlayerToBall", 0.5f  },
+                { "VelocityPlayerToBall", 1.0f  },  // mover para a bola, já secundário
                 { "FaceBall",             0.1f  },
-                { "Air",                  0.4f },  // manter hábito de saltar
+                { "Air",                  0.3f  },  // manter hábito de saltar
                 { "AerialDistance",       0.0f  },
-                { "TouchBallAerial",      5.0f  },
+                { "TouchBallAerial",      2.0f  },  // baby aerials começam a aparecer
                 { "WallLaunch",           0.0f  },
-                { "Speed",                0.3f },
-                { "Whiff",               -0.5f },
+                { "Speed",                0.1f  },
+                { "Whiff",               -0.5f  },
             },
             /* stateWeights */ {
                 { "Kickoff",     1.0f },
@@ -120,18 +124,19 @@ inline std::vector<Phase> GetPhases() {
             "Plat-Aerials",
             /* startTimesteps */ 900'000'000,
             /* rewardWeights  */ {
-                { "GoalBonus",            100.0f  },
-                { "VelocityBallToGoal",   4.0f  },
+                // Guia (middle stage): golo moderado, shaping de aerial forte, resto a descer.
+                { "GoalBonus",            20.0f },  // mantém moderado
+                { "VelocityBallToGoal",   5.0f  },
                 { "TouchAccel",           2.0f  },
-                { "StrongTouch",          2.0f  },
-                { "VelocityTouch",        0.3f  },
-                { "VelocityPlayerToBall", 0.2f  },
+                { "StrongTouch",          3.0f  },  // powershots (zero-sum: adversário quer impedir)
+                { "VelocityTouch",        0.0f  },
+                { "VelocityPlayerToBall", 0.3f  },
                 { "FaceBall",             0.05f },
-                { "Air",                  0.7f },
-                { "AerialDistance",       8.0f  },  // distância aerial = bom
-                { "TouchBallAerial",      10.0f  },  // toque no ar = bom
-                { "WallLaunch",           2.0f  },  // parede ainda não
-                { "Speed",                0.02f },
+                { "Air",                  0.5f  },
+                { "AerialDistance",       5.0f  },  // aerial bem executado
+                { "TouchBallAerial",      8.0f  },  // toque no ar = bom
+                { "WallLaunch",           0.0f  },  // parede só na fase seguinte
+                { "Speed",                0.05f },
                 { "Whiff",               -0.1f  },
             },
             /* stateWeights */ {
@@ -166,19 +171,20 @@ inline std::vector<Phase> GetPhases() {
             "Diamond-CrossEParede",
             /* startTimesteps */ 2'000'000'000,
             /* rewardWeights  */ {
-                { "GoalBonus",            100.0f },
-                { "VelocityBallToGoal",    2.0f },
-                { "TouchAccel",            1.0f },
-                { "StrongTouch",           3.0f },
-                { "VelocityTouch",         0.3f },
-                { "VelocityPlayerToBall",  0.2f },
-                { "FaceBall",              0.02f },
-                { "Air",                   0.3f },
-                { "AerialDistance",        4.0f },
-                { "TouchBallAerial",       3.0f },  // aerial shot bem executado
-                { "WallLaunch",            2.0f },  // mecânica de parede agora premiada
-                { "Speed",                 0.01f },
-                { "Whiff",                -1.0f },
+                // Guia (later stage): confia no golo moderado + zero-sum, shaping ao mínimo.
+                { "GoalBonus",            20.0f },  // nunca massivo, mesmo no fim
+                { "VelocityBallToGoal",   3.0f  },
+                { "TouchAccel",           1.0f  },
+                { "StrongTouch",          3.0f  },
+                { "VelocityTouch",        0.0f  },
+                { "VelocityPlayerToBall", 0.1f  },
+                { "FaceBall",             0.0f  },
+                { "Air",                  0.3f  },
+                { "AerialDistance",       3.0f  },
+                { "TouchBallAerial",      3.0f  },  // aerial shot bem executado
+                { "WallLaunch",           2.0f  },  // mecânica de parede agora premiada
+                { "Speed",                0.02f },
+                { "Whiff",               -1.0f  },
             },
             /* stateWeights */ {
                 { "Kickoff",     0.5f },

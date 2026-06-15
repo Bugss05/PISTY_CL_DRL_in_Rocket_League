@@ -23,12 +23,9 @@ Just replace this with your original examplemain.cpp file in your GigalearnCPP-L
 #include <RLGymCPP/StateSetters/DefenderState.h>
 #include <RLGymCPP/ActionParsers/DefaultAction.h>
 #include "SchedulableState.h"
-#include "PhaseConfig.h"
 
 using namespace GGL;
 using namespace RLGC;
-
-SimpleScheduler g_scheduler;
 
 EnvCreateResult EnvCreateFunc(int index) {
     // Rewards — pesos iniciais 0; o scheduler aplica a Fase 0 na primeira iteração.
@@ -44,39 +41,34 @@ EnvCreateResult EnvCreateFunc(int index) {
     //   ZERO-SUM  -> golos, bola->golo, powershots/toques fortes, velocidade.
     //   NÃO zero-sum -> mecânica/movimento/afinação (ar, encarar bola, aerial,
     //                   parede, whiff): zero-sum aqui só adicionaria ruído.
-    struct NamedReward { std::string name; Reward* reward; };
-    std::vector<NamedReward> named = {
+    // ===== PESOS DAS REWARDS — EDITA AQUI À MÃO (sem scheduler) =====
+    // Formato: { reward, peso }.
+    // ZeroSumReward(child, teamSpirit, opponentScale):
+    //   teamSpirit=0 em 1v1; opponentScale=1.0 -> zero-sum total;
+    //   opponentScale<1.0 -> viés de agressividade (sofrer custa menos que marcar).
+    std::vector<WeightedReward> rewards = {
         // --- ZERO-SUM (o adversário quer impedir) ---
-        { "GoalBonus",            new ZeroSumReward(new GoalBonusReward(),               0.0f, 0.8f) }, // golo (viés agressivo 0.8)
-        { "VelocityBallToGoal",   new ZeroSumReward(new VelocityBallToGoalReward(false), 0.0f, 1.0f) }, // bola->golo = progresso ofensivo
-        { "TouchAccel",           new ZeroSumReward(new TouchAccelReward(),              0.0f, 1.0f) }, // powershot
-        { "StrongTouch",          new ZeroSumReward(new StrongTouchReward(),             0.0f, 1.0f) }, // powershot (guia)
-        { "VelocityTouch",        new ZeroSumReward(new VelocityTouchReward(),           0.0f, 1.0f) }, // powershot
+        { new ZeroSumReward(new GoalBonusReward(),               0.0f, 0.8f),  0.0f }, // golo (viés agressivo 0.8)
+        { new ZeroSumReward(new VelocityBallToGoalReward(false), 0.0f, 1.0f),  0.0f }, // bola->golo = progresso ofensivo
+        { new ZeroSumReward(new TouchAccelReward(),              0.0f, 1.0f), 50.0f }, // toca na bola! (sinal dominante)
+        { new ZeroSumReward(new StrongTouchReward(),             0.0f, 1.0f),  0.0f }, // powershot
+        { new ZeroSumReward(new VelocityTouchReward(),           0.0f, 1.0f),  0.0f }, // powershot
         // --- NÃO zero-sum (mecânica/movimento/afinação) ---
-        { "VelocityPlayerToBall", new VelocityPlayerToBallReward()                     }, // movimento
-        { "FaceBall",             new FaceBallReward()                                  }, // orientação
-        { "Air",                  new AirReward()                                       }, // guia: não zero-sum
-        { "AerialDistance",       new AerialDistanceReward()                            }, // shaping de aerial
-        { "TouchBallAerial",      new TouchBallAerialReward()                           }, // shaping de aerial
-        { "WallLaunch",           new WallLaunchReward()                                }, // mecânica de parede
-        // --- ZERO-SUM (guia: "having speed" -> adversário quer impedir) ---
-        { "Speed",                new ZeroSumReward(new SpeedReward(),                   0.0f, 1.0f) }, // ter velocidade
-        // --- NÃO zero-sum (penalização própria) ---
-        { "Whiff",                new WhiffReward()                                     }, // falhar a bola (erro próprio)
+        { new VelocityPlayerToBallReward(),                                    5.0f }, // mover-se para a bola
+        { new FaceBallReward(),                                               1.0f }, // não conduzir de costas
+        { new AirReward(),                                                    0.15f }, // NAO ESQUECER DE SALTAR
+        { new AerialDistanceReward(),                                         0.0f }, // shaping de aerial
+        { new TouchBallAerialReward(),                                        0.0f }, // shaping de aerial
+        { new WallLaunchReward(),                                             0.0f }, // mecânica de parede
+        // --- ZERO-SUM (velocidade -> adversário quer impedir) ---
+        { new ZeroSumReward(new SpeedReward(),                   0.0f, 1.0f),  0.0f }, // ter velocidade
+        // --- NÃO zero-sum (penalização própria; peso NEGATIVO para punir) ---
+        { new WhiffReward(),                                                  0.0f }, // falhar a bola (erro próprio)
     };
 
-    std::vector<WeightedReward> rewards;
-    std::vector<std::string>    rewardNames;
-    for (auto& nr : named) {
-        rewards.push_back({ nr.reward, 0.0f });
-        rewardNames.push_back(nr.name);
-    }
-    RegisterRewardNames(rewardNames);
-
     std::vector<TerminalCondition*> terminals = {
-        new NoTouchCondition(15),
         new GoalScoreCondition(),
-        new TimeoutCondition(40.f),
+        new TimeoutCondition(60.f),
     };
 
     // 1v1: um carro BLUE e um carro ORANGE
@@ -131,7 +123,6 @@ EnvCreateResult EnvCreateFunc(int index) {
 }
 
 void StepCallback(Learner* learner, const std::vector<GameState>& states, Report& report) {
-    g_scheduler.Update(learner, report); // verifica e avança fase se necessário
 
     bool doExpensiveMetrics = (rand() % 4) == 0;
 
@@ -161,7 +152,7 @@ int main(int argc, char* argv[]) {
     // AMD (9070 XT) NÃO tem CUDA. Este framework só suporta CUDA ou CPU.
     // AUTO -> usa GPU se torch::cuda::is_available() (CUDA/ROCm-Linux), senão CPU.
     // No Windows com AMD, isto corre em CPU.
-    cfg.deviceType  = LearnerDeviceType::AUTO;
+    cfg.deviceType  = LearnerDeviceType::GPU_CUDA; // ou LearnerDeviceType::CPU para forçar CPU (AMD/Windows)
     cfg.tickSkip    = 8;
     cfg.actionDelay = cfg.tickSkip - 1;
     cfg.numGames    = 576;
@@ -197,6 +188,7 @@ int main(int argc, char* argv[]) {
     cfg.skillTracker.updateInterval = 16;
     cfg.skillTracker.ratingInc      = 5;
     cfg.skillTracker.initialRating  = 0;
+    cfg.trainAgainstOldVersions     = true; // treina contra snapshots antigos (league), não só mirror
 
     bool renderMode = false;
     for (int i = 1; i < argc; ++i) {
