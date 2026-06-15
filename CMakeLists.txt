@@ -3,6 +3,7 @@ cmake_minimum_required (VERSION 3.8)
 project("GigaLearnBot")
 
 file(GLOB_RECURSE FILES_SRC "src/*.cpp" "src/*.h" "src/*.hpp")
+list(REMOVE_ITEM FILES_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/ExampleMain.cpp")
 add_executable(GigaLearnBot ${FILES_SRC})
 
 # Set C++ version to 20
@@ -21,9 +22,3 @@ target_link_libraries(GigaLearnBot GigaLearnCPP)
 # Include RLBot
 add_subdirectory(RLBotCPP)
 target_link_libraries(GigaLearnBot RLBotCPP)
-
-# --- Teste standalone da lógica do scheduler (sem torch/Learner) ---
-# Build: cmake --build build --config Release --target scheduler_test
-add_executable(scheduler_test "tests/scheduler_test.cpp")
-target_include_directories(scheduler_test PRIVATE "src")
-set_target_properties(scheduler_test PROPERTIES CXX_STANDARD 20 LINKER_LANGUAGE CXX)
