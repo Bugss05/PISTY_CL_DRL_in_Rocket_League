@@ -55,7 +55,12 @@ public:
 				// Guarda-redes: junto à linha de golo laranja, dentro da baliza.
 				x   = RandFloat(-700.f, 700.f);          // largura da baliza (±892) com margem
 				y   = RandFloat(4600.f, 5100.f);         // junto à linha de golo (+5120)
-				yaw = -(float)M_PI / 2.f + RandFloat(-0.30f, 0.30f); // vira para -Y (campo)
+				// Orienta para o ponto médio entre a bola e a baliza (mais natural que
+				// fixar apenas para -Y). Mantém pequena perturbação aleatória.
+				float goalYpos = 5120.f;
+				Vec goalPos = Vec(0.f, goalYpos, 0.f);
+				Vec midPoint = Vec((ballPos.x + goalPos.x) * 0.5f, (ballPos.y + goalPos.y) * 0.5f, 0.f);
+				yaw = atan2f(midPoint.y - y, midPoint.x - x) + RandFloat(-0.30f, 0.30f);
 			} else { // BEHIND_BALL
 				// Defensor na trajetória horizontal da bola, bem à frente dela.
 				Vec flat = Vec(ballVel.x, ballVel.y, 0.f);
