@@ -1,0 +1,18 @@
+        { new ZeroSumReward(new GoalReward(), 0.0f, 1.0f),  30.0f }, // golo (viés agressivo 0.8)
+        { new ZeroSumReward(new VelocityBallToGoalReward(false), 0.0f, 0.8f),  4.0f }, // bola->golo = progresso ofensivo
+        { new TouchAccelReward(),              0.0f }, // toca na bola! (sinal dominante)
+        { new StrongTouchReward(30,100),       2.0f }, // powershot
+        { new VelocityTouchReward(),            0.0f }, // powershot
+        { new VelocityPlayerToBallReward(),     2.0f }, 
+        { new TouchBallReward(),                3.0f }, 
+        { new FaceBallReward(),                 0.2f }, 
+        { new AirReward(),                      0.5f }, 
+        { new AerialDistanceReward(),           0.0f }, 
+        { new TouchBallAerialReward(),          0.0f }, 
+        { new WallLaunchReward(),               0.0f }, 
+        { new SpeedReward(),                    0.4f }, // ter velocidade
+        // --- NÃO zero-sum (penalização própria; peso NEGATIVO para punir) ---
+        { new WhiffReward(),                    -0.1f }, // falhar a bola (erro próprio)
+        { new ZeroSumReward(new BumpReward(), 0.5f), 5 },
+		{ new ZeroSumReward(new DemoReward(), 0.5f), 3 },
+        { new LandAllFoursReward(),            0.4f   }, 

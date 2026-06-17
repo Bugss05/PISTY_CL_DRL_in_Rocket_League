@@ -25,12 +25,6 @@ namespace RLGC {
 			child->PreStep(state);
 		}
 
-		// Forward parameter changes to the wrapped reward (e.g. ZeroSumReward(GoalReward))
-		// so the Scheduler can tune the inner reward by its scheduled name.
-		virtual void SetParam(const std::string& key, float value) override {
-			child->SetParam(key, value);
-		}
-
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) {
 			return child->GetReward(player, state, isFinal);
 		}

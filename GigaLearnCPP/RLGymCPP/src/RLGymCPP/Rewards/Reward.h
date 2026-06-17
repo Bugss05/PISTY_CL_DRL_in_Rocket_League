@@ -13,12 +13,6 @@ namespace RLGC {
 
 		virtual void PreStep(const GameState& state) {}
 
-		// Optional runtime-tunable parameters. Rewards that accept constructor
-		// arguments (e.g. StrongTouchReward's min/maxSpeedKPH) override this so the
-		// Scheduler can change them per training phase. Unknown keys are ignored;
-		// rewards without parameters keep the default no-op.
-		virtual void SetParam(const std::string& key, float value) {}
-
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) {
 			throw std::runtime_error("GetReward() is unimplemented");
 			return 0;

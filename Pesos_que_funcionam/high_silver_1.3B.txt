@@ -1,0 +1,35 @@
+        { new ZeroSumReward(new GoalReward(-1, 2.0f), 0.0f, 1.0f),              40.0f }, // GoalReward(concedeScale, speedScale): golo escalado pela velocidade de entrada
+        { new ZeroSumReward(new VelocityBallToGoalReward(false), 0.0f, 0.8f),   3.0f }, // bola->golo = progresso ofensivo
+        { new TouchAccelReward(),                                               1.5f }, // toca na bola! (sinal dominante)
+        { new StrongTouchReward(30,100),                                        0.85f }, // StrongTouchReward(minSpeedKPH, maxSpeedKPH): powershot
+        { new VelocityPlayerToBallReward(),                                     0.25f },
+        { new TouchBallReward(),                                                0.05f },
+        { new FaceBallReward(),                                                 0.3f },
+        { new AirReward(300.f, 0.3f, 3.0f, 0.3f),                               1.0f }, // AirReward(heightThresh, lowScale, noTouchTime, noTouchScale): ar por altura; decai após 3s sem tocar
+        { new WallLaunchReward(),                                               0.2f },
+        { new SpeedReward(),                                                    0.1f }, // ter velocidade
+        // --- Mecânica aérea (novas) ---
+
+        { new AirTouchReward(0.6f, 500.f),                                      10.0f }, // AirTouchReward(minAirTime, minBallHeight): toque aéreo com tempo+altura mínimos
+        { new DoubleJumpBoostReward(50.f, 500.f),                              0.25f }, // DoubleJumpBoostReward(belowTolerance, minBallHeight): double jump + boost p/ aéreo
+        { new FlickReward(1.0f, 2.0f, 0.05f),                                   4.5f }, // FlickReward(velScale, heightScale, jumpReward): flick (dodge com direção, qualquer)
+        { new FlickTowardsBallReward(1.0f),                                     2.5f }, // FlickTowardsBallReward(maxAirTime): flip rasteiro que acaba mais perto da bola
+        { new ForwardFlipReward(0.5f),                                          1.0f }, // ForwardFlipReward(forwardThresh): aprender flip p/ a frente, escala c/ velocidade no nariz
+
+        // --- Eventos do jogo (preenchidos pelo GameEventTracker) ---
+        { new ZeroSumReward(new ShotReward(),0.0f,0.2f),                        2.5f }, // remate à baliza
+        { new ZeroSumReward(new SaveReward(),0.0f,0.2f),                        10.0f }, // defesa
+
+        { new WhiffReward(),                                                    -0.25f }, // falhar a bola (erro próprio)
+        //{ new BallTouchGroundPenalty(1000.f, 500.f, 2000.f),                    -1.0f }, // BallTouchGroundPenalty(horizThresh, zThresh, zMax): bola a cair (sitter); peso NEGATIVO
+        { new ZeroSumReward(new BumpReward(),0.0f,0.5f),                        4.0f }, // bump no adversário
+        { new ZeroSumReward(new DemoReward(),0.0f,0.5f),                        3.0f }, // demo no adversário
+        { new LandAllFoursReward(),                                             0.8f }, // aterrar nas 4 rodas
+        
+        { new WavedashReward(),                                                 1.0f }, // wavedash (dodge+land rápido)
+    };
+
+    std::vector<TerminalCondition*> terminals = {
+        new GoalScoreCondition(),
+        new TimeoutCondition(60.f),
+    };

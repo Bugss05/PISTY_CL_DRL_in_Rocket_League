@@ -71,3 +71,4 @@ collision_meshes/
 *.slnx
 Videos/
 src/config.h
+/checkpoints_importantes

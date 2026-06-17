@@ -48,35 +48,49 @@ EnvCreateResult EnvCreateFunc(int index) {
     //   opponentScale<1.0 -> viés de agressividade (sofrer custa menos que marcar).
     std::vector<WeightedReward> rewards = {
         // --- ZERO-SUM (o adversário quer impedir) ---
-        { new ZeroSumReward(new GoalBonusReward(),               0.0f, 0.8f),  0.0f }, // golo (viés agressivo 0.8)
-        { new ZeroSumReward(new VelocityBallToGoalReward(false), 0.0f, 1.0f),  0.0f }, // bola->golo = progresso ofensivo
-        { new ZeroSumReward(new TouchAccelReward(),              0.0f, 1.0f), 50.0f }, // toca na bola! (sinal dominante)
-        { new ZeroSumReward(new StrongTouchReward(),             0.0f, 1.0f),  0.0f }, // powershot
-        { new ZeroSumReward(new VelocityTouchReward(),           0.0f, 1.0f),  0.0f }, // powershot
-        // --- NÃO zero-sum (mecânica/movimento/afinação) ---
-        { new VelocityPlayerToBallReward(),                                    5.0f }, // mover-se para a bola
-        { new FaceBallReward(),                                               1.0f }, // não conduzir de costas
-        { new AirReward(),                                                    0.15f }, // NAO ESQUECER DE SALTAR
-        { new AerialDistanceReward(),                                         0.0f }, // shaping de aerial
-        { new TouchBallAerialReward(),                                        0.0f }, // shaping de aerial
-        { new WallLaunchReward(),                                             0.0f }, // mecânica de parede
-        // --- ZERO-SUM (velocidade -> adversário quer impedir) ---
-        { new ZeroSumReward(new SpeedReward(),                   0.0f, 1.0f),  0.0f }, // ter velocidade
-        // --- NÃO zero-sum (penalização própria; peso NEGATIVO para punir) ---
-        { new WhiffReward(),                                                  0.0f }, // falhar a bola (erro próprio)
+        { new ZeroSumReward(new GoalReward(-1, 1.2f, 2.5f), 0.0f, 1.0f),        40.0f }, // GoalReward(concedeScale, speedScale, heightScale): golo escalado pela velocidade e ALTURA de entrada
+        { new ZeroSumReward(new VelocityBallToGoalReward(false), 0.0f, 0.8f),   3.0f }, // bola->golo = progresso ofensivo
+        { new TouchAccelReward(),                                               1.5f }, // toca na bola! (sinal dominante)
+        { new StrongTouchReward(30,100),                                        0.85f }, // StrongTouchReward(minSpeedKPH, maxSpeedKPH): powershot
+        { new VelocityPlayerToBallReward(),                                     0.25f },
+        { new TouchBallReward(),                                                0.05f },
+        { new FaceBallReward(),                                                 0.3f },
+        { new AirReward(300.f, 0.3f, 3.0f, 0.3f),                               1.0f }, // AirReward(heightThresh, lowScale, noTouchTime, noTouchScale): ar por altura; decai após 3s sem tocar
+        { new WallLaunchReward(),                                               0.2f },
+        { new SpeedReward(),                                                    0.1f }, // ter velocidade
+        // --- Mecânica aérea (novas) ---
+
+        { new AirTouchReward(0.3f, 500.f),                                      10.0f }, // AirTouchReward(minAirTime, minBallHeight): toque aéreo com tempo+altura mínimos
+        { new DoubleJumpBoostReward(25.f, 350.f),                              0.25f }, // DoubleJumpBoostReward(belowTolerance, minBallHeight): double jump + boost p/ aéreo
+        { new FlickReward(1.0f, 2.0f, 0.05f, 0.65f),                             8.5f }, // FlickReward(velScale, heightScale, jumpReward, forwardThresh): flick PARA A FRENTE na bola
+        { new FlickTowardsBallReward(0.6f, 0.65f),                               3.5f }, // FlickTowardsBallReward(maxAirTime, forwardThresh): flip rasteiro p/ a frente que acaba mais perto da bola
+
+        // --- Eventos do jogo (preenchidos pelo GameEventTracker) ---
+        { new ZeroSumReward(new ShotReward(),0.0f,0.2f),                        2.5f }, // remate à baliza
+        { new ZeroSumReward(new SaveReward(),0.0f,0.2f),                        10.0f }, // defesa
+
+        { new WhiffReward(),                                                    -0.25f }, // falhar a bola (erro próprio)
+        //{ new BallTouchGroundPenalty(1000.f, 500.f, 2000.f),                    -1.0f }, // BallTouchGroundPenalty(horizThresh, zThresh, zMax): bola a cair (sitter); peso NEGATIVO
+        { new ZeroSumReward(new BumpReward(),0.0f,0.5f),                        4.0f }, // bump no adversário
+        { new ZeroSumReward(new DemoReward(),0.0f,0.5f),                        3.0f }, // demo no adversário
+        { new LandAllFoursReward(),                                             0.8f }, // aterrar nas 4 rodas
+        
+        { new WavedashReward(),                                                 1.0f }, // wavedash (dodge+land rápido)
+
+
     };
 
     std::vector<TerminalCondition*> terminals = {
         new GoalScoreCondition(),
-        new TimeoutCondition(60.f),
+        new TimeoutCondition(40.f),
     };
 
     // 1v1: um carro BLUE e um carro ORANGE
     auto arena = Arena::Create(GameMode::SOCCAR);
 
     MutatorConfig mutator = MutatorConfig(GameMode::SOCCAR);
-    mutator.boostUsedPerSecond = 0.0f;
-    mutator.carSpawnBoostAmount = 100.0f;
+    mutator.boostUsedPerSecond = 1.0f;
+    mutator.carSpawnBoostAmount = 0.0f;
     arena->SetMutatorConfig(mutator);
 
     arena->AddCar(Team::BLUE,   CAR_CONFIG_PLANK);
@@ -94,14 +108,14 @@ EnvCreateResult EnvCreateFunc(int index) {
 
         // Passe rasteiro/meia-altura: defensor na TRAJETÓRIA da bola, à frente
         // dela e com X variado (não preso à baliza). A bola vai ter com ele.
-        { "Pass", new DefenderState(new PassState(300.f, 900.f), DefenderState::BEHIND_BALL), 0.0f },
+        { "Pass", new DefenderState(new PassState(300.f, 1600.f), DefenderState::BEHIND_BALL), 1.0f },
 
         // Aerial (substitui o StaticAerial): bola a cair de mais alto, com
         // guarda-redes na baliza. "valores mais altos" = 700..1600.
-        { "FallingBall", new DefenderState(new FallingBallApproachState(700.f, 1600.f), DefenderState::GOAL), 0.0f },
+        { "FallingBall", new DefenderState(new FallingBallApproachState(700.f, 1600.f), DefenderState::GOAL), 1.0f },
 
         // Cruzamento: bola colada à parede a cruzar para a área, guarda-redes na baliza.
-        { "Cross", new DefenderState(new CrossState(), DefenderState::GOAL), 0.0f },
+        { "Cross", new DefenderState(new CrossState(), DefenderState::GOAL), 1.0f },
 
         // Mecânica avançada de parede (wall dribble/launch) — só nas fases finais,
         // requer a reward WallLaunch activa. Drill puro, sem defensor.
@@ -123,6 +137,28 @@ EnvCreateResult EnvCreateFunc(int index) {
 }
 
 void StepCallback(Learner* learner, const std::vector<GameState>& states, Report& report) {
+
+    // RENDER: imprime em live as ações de cada carro e SALIENTA os flips (dodges).
+    if (learner->config.renderMode && !states.empty()) {
+        const GameState& gs = states[0]; // arena 0 (render = 1 jogo)
+        for (auto& player : gs.players) {
+            const Action& a = player.prevAction;
+            const char* teamStr = player.team == Team::BLUE ? "BLUE" : "ORANGE";
+
+            // Início de um FLIP (dodge) neste step -> alerta bem visível.
+            bool flipStarted = player.prev && player.isFlipping && !player.prev->isFlipping;
+            if (flipStarted) {
+                const char* dir = player.flipRelTorque.y > 0.5f ? "FRENTE"
+                                : player.flipRelTorque.y < -0.5f ? "TRAS" : "LADO";
+                printf(">>>>>>>>>>  FLIP! Car %u %s  dir=%s  flipRelTorque.y=%+.2f  <<<<<<<<<<\n",
+                    player.carId, teamStr, dir, player.flipRelTorque.y);
+            }
+
+            printf("[Car %u %s] thr=%+.1f steer=%+.1f pitch=%+.1f yaw=%+.1f roll=%+.1f jump=%.0f boost=%.0f hb=%.0f %s\n",
+                player.carId, teamStr, a.throttle, a.steer, a.pitch, a.yaw, a.roll,
+                a.jump, a.boost, a.handbrake, player.isFlipping ? "[FLIPPING]" : "");
+        }
+    }
 
     bool doExpensiveMetrics = (rand() % 4) == 0;
 
@@ -155,16 +191,16 @@ int main(int argc, char* argv[]) {
     cfg.deviceType  = LearnerDeviceType::GPU_CUDA; // ou LearnerDeviceType::CPU para forçar CPU (AMD/Windows)
     cfg.tickSkip    = 8;
     cfg.actionDelay = cfg.tickSkip - 1;
-    cfg.numGames    = 576;
+    cfg.numGames    = 768;
 
     cfg.ppo.tsPerItr       = 262144;
     cfg.ppo.batchSize      = 262144;  // guia: = tsPerItr
     cfg.ppo.miniBatchSize  = 131072;   // guia: 25k-50k (porção pequena do batch, poupa VRAM/RAM)
-    cfg.ppo.epochs         = 1;       // guia: 2-3 (era 1, abaixo do recomendado)
+    cfg.ppo.epochs         = 2;       // guia: 2-3 (era 1, abaixo do recomendado)
     cfg.ppo.entropyScale   = 0.035f;
-    cfg.ppo.gaeGamma       = 0.99f;
-    cfg.ppo.policyLR       = 2e-4f;
-    cfg.ppo.criticLR       = 2e-4f;
+    cfg.ppo.gaeGamma       = 0.995f;
+    cfg.ppo.policyLR       = 1.35e-4f;
+    cfg.ppo.criticLR       = 1.35e-4f;
     cfg.ppo.sharedHead.layerSizes = { 1024, 1024, 1024 }; // guia: 512-1024 (mais profundo = mais lento, mas melhor)
     cfg.ppo.policy.layerSizes     = { 256, 256, 256 };
     cfg.ppo.critic.layerSizes     = { 256, 256, 256 };
@@ -179,7 +215,7 @@ int main(int argc, char* argv[]) {
 
     // Half-precision só compensa em GPU CUDA; em CPU (AMD/Windows) é mais lento.
     // Volta a true se treinares numa GPU CUDA.
-    cfg.ppo.useHalfPrecision = true;
+    cfg.ppo.useHalfPrecision = false;
 
     // ELO + self-play contra versoes anteriores
     cfg.skillTracker.enabled        = true;
@@ -212,7 +248,7 @@ int main(int argc, char* argv[]) {
     cfg.randomSeed = 123;
 
     {
-        std::string runName = "1v1-selfplay";
+        std::string runName = "1v1-selfplay";//"1v1-selfplay"
         std::time_t t = std::time(nullptr);
         std::tm tm_buf;
 #ifdef _WIN32
