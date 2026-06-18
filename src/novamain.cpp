@@ -7,9 +7,12 @@ Just replace this with your original examplemain.cpp file in your GigalearnCPP-L
 
 #include <ctime>
 #include <string>
+#include <filesystem>
+#include <cstdio>
 
 #include <RLGymCPP/Rewards/CommonRewards.h>
 #include <RLGymCPP/Rewards/ZeroSumReward.h>
+#include <RLGymCPP/Rewards/GoalDirectionReward.h>
 #include <RLGymCPP/TerminalConditions/NoTouchCondition.h>
 #include <RLGymCPP/TerminalConditions/GoalScoreCondition.h>
 #include <RLGymCPP/TerminalConditions/TimeoutCondition.h>
@@ -17,15 +20,24 @@ Just replace this with your original examplemain.cpp file in your GigalearnCPP-L
 #include <RLGymCPP/StateSetters/KickoffState.h>
 #include <RLGymCPP/StateSetters/RandomState.h>
 #include <RLGymCPP/StateSetters/WallDragState.h>
-#include <RLGymCPP/StateSetters/PassState.h>
-#include <RLGymCPP/StateSetters/FallingBallApproachState.h>
-#include <RLGymCPP/StateSetters/CrossState.h>
-#include <RLGymCPP/StateSetters/DefenderState.h>
+#include <RLGymCPP/StateSetters/PassingState.h>
+#include <RLGymCPP/StateSetters/CrossingState.h>
+#include <RLGymCPP/StateSetters/ShootingState.h>
 #include <RLGymCPP/ActionParsers/DefaultAction.h>
+#include <RLGymCPP/ActionParsers/NoMoveAction.h>
 #include "SchedulableState.h"
 
 using namespace GGL;
 using namespace RLGC;
+
+// Mete a TRUE à mão para os carros NÃO se mexerem (usa NoMoveAction em vez de
+// DefaultAction). Ex.: observar o cenário em render com os bots parados.
+bool g_freezeBots = true;
+
+// Mete a TRUE para o BACKUP NOTURNO: a cada g_nightBackupInterval iterações copia a
+// pasta inteira de checkpoints para run_noite/<iteracao>/.
+bool g_nightBackup = false;
+int  g_nightBackupInterval = 150;
 
 EnvCreateResult EnvCreateFunc(int index) {
     // Rewards — pesos iniciais 0; o scheduler aplica a Fase 0 na primeira iteração.
@@ -48,41 +60,43 @@ EnvCreateResult EnvCreateFunc(int index) {
     //   opponentScale<1.0 -> viés de agressividade (sofrer custa menos que marcar).
     std::vector<WeightedReward> rewards = {
         // --- ZERO-SUM (o adversário quer impedir) ---
-        { new ZeroSumReward(new GoalReward(-1, 1.2f, 2.5f), 0.0f, 1.0f),        40.0f }, // GoalReward(concedeScale, speedScale, heightScale): golo escalado pela velocidade e ALTURA de entrada
-        { new ZeroSumReward(new VelocityBallToGoalReward(false), 0.0f, 0.8f),   3.0f }, // bola->golo = progresso ofensivo
-        { new TouchAccelReward(),                                               1.5f }, // toca na bola! (sinal dominante)
-        { new StrongTouchReward(30,100),                                        0.85f }, // StrongTouchReward(minSpeedKPH, maxSpeedKPH): powershot
+        { new ZeroSumReward(new GoalReward(-1, 1.2f, 2.5f), 0.0f, 1.0f),        60.0f }, // GoalReward(concedeScale, speedScale, heightScale): golo escalado pela velocidade e ALTURA de entrada
+        { new ZeroSumReward(new VelocityBallToGoalReward(false), 0.0f, 0.8f),   5.0f }, // bola->golo = progresso ofensivo
+        { new GoalDirectionReward(new TouchAccelReward(), true),                1.5f }, // GoalDirectionReward(child, onlyAttackHalf): na metade de ataque só conta se for p/ a baliza
+        { new GoalDirectionReward(new StrongTouchReward(30,100), true),         0.85f }, // idem: powershot direcionado à baliza na metade de ataque
         { new VelocityPlayerToBallReward(),                                     0.25f },
         { new TouchBallReward(),                                                0.05f },
-        { new FaceBallReward(),                                                 0.3f },
-        { new AirReward(300.f, 0.3f, 3.0f, 0.3f),                               1.0f }, // AirReward(heightThresh, lowScale, noTouchTime, noTouchScale): ar por altura; decai após 3s sem tocar
+        { new FaceBallReward(),                                                 0.15f },
+        { new AirReward(300.f, 0.3f, 5.0f, 0.3f),                               0.8f }, // AirReward(heightThresh, lowScale, noTouchTime, noTouchScale): ar por altura; decai após 3s sem tocar
         { new WallLaunchReward(),                                               0.2f },
-        { new SpeedReward(),                                                    0.1f }, // ter velocidade
+        { new SpeedReward(),                                                    0.08f }, // ter velocidade
         // --- Mecânica aérea (novas) ---
 
-        { new AirTouchReward(0.3f, 500.f),                                      10.0f }, // AirTouchReward(minAirTime, minBallHeight): toque aéreo com tempo+altura mínimos
-        { new DoubleJumpBoostReward(25.f, 350.f),                              0.25f }, // DoubleJumpBoostReward(belowTolerance, minBallHeight): double jump + boost p/ aéreo
-        { new FlickReward(1.0f, 2.0f, 0.05f, 0.65f),                             8.5f }, // FlickReward(velScale, heightScale, jumpReward, forwardThresh): flick PARA A FRENTE na bola
-        { new FlickTowardsBallReward(0.6f, 0.65f),                               3.5f }, // FlickTowardsBallReward(maxAirTime, forwardThresh): flip rasteiro p/ a frente que acaba mais perto da bola
+        { new AirTouchReward(0.3f, 500.f),                                      8.0f }, // AirTouchReward(minAirTime, minBallHeight): toque aéreo com tempo+altura mínimos
+        { new DoubleJumpBoostReward(25.f, 350.f),                              0.55f }, // DoubleJumpBoostReward(belowTolerance, minBallHeight): double jump + boost p/ aéreo
+        { new GoalDirectionReward(new FlickReward(1.0f, 2.0f, 0.05f, 0.65f), true), 8.5f }, // flick PARA A FRENTE; na metade de ataque só conta se for p/ a baliza
+        { new ForwardFlipReward(0.7f),                                            0.5f }, // ForwardFlipReward(forwardThresh): flip PARA A FRENTE (não lateral/trás)
+        { new AirProximityReward(400.f, 2500.f, 300.f),                          0.6f }, // AirProximityReward(minBallHeight, maxDist, wallMargin): perto da bola no ar × altura × velocidade
+        { new ConsecutiveAirTouchReward(300.f, 10),                               3.0f }, // ConsecutiveAirTouchReward(minBallHeight, maxCount): multiplicador por toques aéreos seguidos
 
         // --- Eventos do jogo (preenchidos pelo GameEventTracker) ---
         { new ZeroSumReward(new ShotReward(),0.0f,0.2f),                        2.5f }, // remate à baliza
         { new ZeroSumReward(new SaveReward(),0.0f,0.2f),                        10.0f }, // defesa
 
-        { new WhiffReward(),                                                    -0.25f }, // falhar a bola (erro próprio)
+        { new WhiffReward(),                                                    -0.15f }, // falhar a bola (erro próprio)
         //{ new BallTouchGroundPenalty(1000.f, 500.f, 2000.f),                    -1.0f }, // BallTouchGroundPenalty(horizThresh, zThresh, zMax): bola a cair (sitter); peso NEGATIVO
         { new ZeroSumReward(new BumpReward(),0.0f,0.5f),                        4.0f }, // bump no adversário
         { new ZeroSumReward(new DemoReward(),0.0f,0.5f),                        3.0f }, // demo no adversário
-        { new LandAllFoursReward(),                                             0.8f }, // aterrar nas 4 rodas
+        { new LandAllFoursReward(),                                             1.5f }, // aterrar nas 4 rodas
         
-        { new WavedashReward(),                                                 1.0f }, // wavedash (dodge+land rápido)
+        { new WavedashReward(),                                                 1.5f }, // wavedash (dodge+land rápido)
 
 
-    };
+    }; 
 
     std::vector<TerminalCondition*> terminals = {
         new GoalScoreCondition(),
-        new TimeoutCondition(40.f),
+        new TimeoutCondition(2.f),
     };
 
     // 1v1: um carro BLUE e um carro ORANGE
@@ -102,28 +116,23 @@ EnvCreateResult EnvCreateFunc(int index) {
     // Cada cenário (Pass/FallingBall/Cross) tem SEMPRE o ORANGE em posição
     // defensiva (DefenderState). WallDrag é mecânica avançada -> só fase final.
     auto stateSetter = new SchedulableState({
-        // Sempre activos — base do treino 1v1
-        { "Kickoff",  new KickoffState(),                   1.0f },
-        { "Random",   new RandomState(true, false, true),   1.0f }, // SEMPRE activo em todas as fases
+        // Base do treino 1v1
+        { "Kickoff",  new KickoffState(),                   0.0f },
+        { "Random",   new RandomState(true, false, true),   0.0f },
 
-        // Passe rasteiro/meia-altura: defensor na TRAJETÓRIA da bola, à frente
-        // dela e com X variado (não preso à baliza). A bola vai ter com ele.
-        { "Pass", new DefenderState(new PassState(300.f, 1600.f), DefenderState::BEHIND_BALL), 1.0f },
+        // Cenários novos (atacante + defensor já incluídos no próprio state setter)
+        { "Passing",  new PassingState(),                   0.0f }, // passe
+        { "Crossing", new CrossingState(),                  2.0f }, // CrossingState(minHeight, maxHeight, minSpeed, maxSpeed)
+        { "Shooting", new ShootingState(),                  0.0f }, // remate
 
-        // Aerial (substitui o StaticAerial): bola a cair de mais alto, com
-        // guarda-redes na baliza. "valores mais altos" = 700..1600.
-        { "FallingBall", new DefenderState(new FallingBallApproachState(700.f, 1600.f), DefenderState::GOAL), 1.0f },
-
-        // Cruzamento: bola colada à parede a cruzar para a área, guarda-redes na baliza.
-        { "Cross", new DefenderState(new CrossState(), DefenderState::GOAL), 1.0f },
-
-        // Mecânica avançada de parede (wall dribble/launch) — só nas fases finais,
-        // requer a reward WallLaunch activa. Drill puro, sem defensor.
-        { "WallDrag", new WallDragState(), 0.0f },
+        // Mecânica avançada de parede (wall dribble/launch)
+        { "WallDrag", new WallDragState(),                  0.0f },
     }, /*stochastic*/ true);
 
     auto obsBuilder   = new DefaultObsPadded(1);
-    auto actionParser = new DefaultAction();
+    ActionParser* actionParser = g_freezeBots
+        ? (ActionParser*)new NoMoveAction()   // bots parados (flag manual)
+        : (ActionParser*)new DefaultAction();
 
     EnvCreateResult result = {};
     result.actionParser       = actionParser;
@@ -137,6 +146,26 @@ EnvCreateResult EnvCreateFunc(int index) {
 }
 
 void StepCallback(Learner* learner, const std::vector<GameState>& states, Report& report) {
+
+    // BACKUP NOTURNO (flag g_nightBackup): a cada g_nightBackupInterval iterações copia
+    // a pasta inteira de checkpoints para run_noite/<iteracao>/ (recuperar bots se piorarem).
+    if (g_nightBackup && !learner->config.renderMode) {
+        static uint64_t lastBackupIter = 0;
+        uint64_t it = learner->totalIterations;
+        if (it > 0 && (it % (uint64_t)g_nightBackupInterval) == 0 && it != lastBackupIter) {
+            lastBackupIter = it;
+            namespace fs = std::filesystem;
+            std::error_code ec;
+            fs::path src = learner->config.checkpointFolder; // default "checkpoints"
+            if (!src.empty() && fs::exists(src)) {
+                fs::path dst = fs::path("run_noite") / std::to_string(it);
+                fs::create_directories(dst.parent_path(), ec);
+                fs::copy(src, dst, fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
+                if (ec) printf("[run_noite] ERRO ao copiar checkpoints: %s\n", ec.message().c_str());
+                else    printf("[run_noite] checkpoints guardados em %s\n", dst.string().c_str());
+            }
+        }
+    }
 
     // RENDER: imprime em live as ações de cada carro e SALIENTA os flips (dodges).
     if (learner->config.renderMode && !states.empty()) {
@@ -196,11 +225,11 @@ int main(int argc, char* argv[]) {
     cfg.ppo.tsPerItr       = 262144;
     cfg.ppo.batchSize      = 262144;  // guia: = tsPerItr
     cfg.ppo.miniBatchSize  = 131072;   // guia: 25k-50k (porção pequena do batch, poupa VRAM/RAM)
-    cfg.ppo.epochs         = 2;       // guia: 2-3 (era 1, abaixo do recomendado)
+    cfg.ppo.epochs         = 1;       // guia: 2-3 (era 1, abaixo do recomendado)
     cfg.ppo.entropyScale   = 0.035f;
     cfg.ppo.gaeGamma       = 0.995f;
-    cfg.ppo.policyLR       = 1.35e-4f;
-    cfg.ppo.criticLR       = 1.35e-4f;
+    cfg.ppo.policyLR       = 1.85e-4f;
+    cfg.ppo.criticLR       = 1.85e-4f;
     cfg.ppo.sharedHead.layerSizes = { 1024, 1024, 1024 }; // guia: 512-1024 (mais profundo = mais lento, mas melhor)
     cfg.ppo.policy.layerSizes     = { 256, 256, 256 };
     cfg.ppo.critic.layerSizes     = { 256, 256, 256 };

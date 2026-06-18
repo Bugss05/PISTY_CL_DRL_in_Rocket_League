@@ -72,3 +72,5 @@ collision_meshes/
 Videos/
 src/config.h
 /checkpoints_importantes
+# Backup noturno de checkpoints
+run_noite/

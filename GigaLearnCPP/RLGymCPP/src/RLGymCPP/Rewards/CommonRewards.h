@@ -2,6 +2,7 @@
 #include "Reward.h"
 #include "../Math.h"
 #include <unordered_map>
+#include <vector>
 
 namespace RLGC {
 
@@ -684,7 +685,7 @@ namespace RLGC {
 			float fwdSpeed = player.vel.Dot(player.rotMat.forward); // velocidade na direção do nariz
 			if (fwdSpeed <= 0.0f) return 0.0f;
 
-			float speedFrac = RS_CLAMP(fwdSpeed / CommonValues::CAR_MAX_SPEED, 0.0f, 1.0f);
+			float speedFrac = RS_CLAMP(fwdSpeed / (CommonValues::CAR_MAX_SPEED/2.0f), 0.0f, 1.0f);
 			float upright   = RS_MAX(0.0f, player.rotMat.up.z);     // 1 = direito, 0/neg = faceplant
 
 			// Alinhamento nariz<->velocidade (cos do ângulo de derrapagem). 1 = perfeito.
@@ -692,6 +693,73 @@ namespace RLGC {
 			float alignment = (speed > 1e-6f) ? RS_CLAMP(fwdSpeed / speed, 0.0f, 1.0f) : 0.0f;
 
 			return speedFrac * upright * alignment;
+		}
+	};
+
+	// 1) PROXIMIDADE NO AR: quando o carro está NO AR (não no chão nem em parede) e a
+	// bola está a uma altura considerável, premeia estar PERTO da bola. Escala com a
+	// proximidade × altura do carro × velocidade do carro.
+	//   - !isOnGround já exclui chão E parede (rodas em parede -> isOnGround true).
+	//   - wallMargin exclui estar colado a uma parede (evita wall-launch).
+	class AirProximityReward : public Reward {
+	public:
+		float minBallHeight; // bola tem de estar acima desta altura (uu) para contar
+		float maxDist;       // distância à bola (uu) a partir da qual a proximidade é 0
+		float wallMargin;    // ignora se o carro estiver a menos disto de uma parede (uu)
+
+		AirProximityReward(float minBallHeight = 500.f, float maxDist = 2500.f, float wallMargin = 300.f)
+			: minBallHeight(minBallHeight), maxDist(maxDist), wallMargin(wallMargin) {}
+
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			if (player.isOnGround) return 0.0f;                       // tem de estar no ar
+			if (state.ball.pos.z < minBallHeight) return 0.0f;        // bola a altura considerável
+
+			// Não colado a uma parede (evita contar wall-launches).
+			if (fabsf(player.pos.x) > CommonValues::SIDE_WALL_X - wallMargin) return 0.0f;
+			if (fabsf(player.pos.y) > CommonValues::BACK_WALL_Y - wallMargin) return 0.0f;
+
+			float dist = (state.ball.pos - player.pos).Length();
+			float proximity  = RS_CLAMP(1.0f - dist / maxDist, 0.0f, 1.0f);              // perto = 1
+			float heightFrac = RS_CLAMP(player.pos.z / CommonValues::CEILING_Z, 0.5f, 1.5f);
+			return proximity * heightFrac;
+		}
+	};
+
+	// 3) TOQUES AÉREOS CONSECUTIVOS: cada vez que toca na bola NO AR (acima de
+	// minBallHeight) SEM ter aterrado, a reward cresce (1×, 2×, 3×, ...). Reinicia ao
+	// aterrar. Incentiva controlar/juggle a bola no ar.
+	// Estado por jogador via vetor indexado por player.index (barato, sem hashing).
+	class ConsecutiveAirTouchReward : public Reward {
+	public:
+		float minBallHeight; // altura mínima da bola (uu) para o toque contar
+		int   maxCount;      // teto do multiplicador (evita explodir)
+
+		ConsecutiveAirTouchReward(float minBallHeight = 400.f, int maxCount = 5)
+			: minBallHeight(minBallHeight), maxCount(maxCount) {}
+
+		std::vector<int> touchCount; // toques aéreos seguidos, por player.index
+
+		virtual void Reset(const GameState& initialState) override {
+			touchCount.clear();
+		}
+
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			int idx = player.index;
+			if ((int)touchCount.size() <= idx) touchCount.resize(idx + 1, 0);
+
+			// Aterrou -> reinicia a contagem.
+			if (player.isOnGround) {
+				touchCount[idx] = 0;
+				return 0.0f;
+			}
+
+			// Toque no ar com altura mínima -> incrementa e premeia (multiplicador crescente).
+			if (player.ballTouchedStep && state.ball.pos.z >= minBallHeight) {
+				if (touchCount[idx] < maxCount) touchCount[idx]++;
+				return (float)touchCount[idx]; // 1, 2, 3, ... (peso na main escala)
+			}
+
+			return 0.0f;
 		}
 	};
 

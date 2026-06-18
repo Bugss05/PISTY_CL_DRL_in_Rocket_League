@@ -62,37 +62,40 @@ void RLGC::CrossingState::ResetArena(Arena* arena) {
 		CarState cs = {};
 
 		if (car->team == Team::BLUE) {
-			// ATACANTE: PERPENDICULAR à trajetória XY da bola.
-			// Escolhe-se um ponto P na trajetória (à frente da bola). Como P está na
-			// linha, P->bola é paralelo à velocidade; deslocando o atacante na
-			// PERPENDICULAR a partir de P, o ângulo (P->bola, P->atacante) = 90° por
-			// construção, e a distância (>=100 uu) à trajetória é esse deslocamento.
-			Vec d = Vec(velX, velY, 0.f).Normalized();    // direção da trajetória XY
-			Vec n = Vec(-d.y, d.x, 0.f);                   // perpendicular (90°)
-			// A trajetória divide o campo em dois lados. O atacante fica na metade
-			// MAIS LONGE da baliza (lado oposto ao da baliza relativamente à linha).
-			Vec ballToGoal = Vec(goal.x - ballX, goal.y - ballY, 0.f);
-			if (ballToGoal.Dot(n) > 0.f) n = n * -1.f;     // se n aponta p/ a baliza, inverte
+			// ===== POSIÇÃO DO ATACANTE (5 passos) =====
+			// 1) vetor bola->baliza (normalizado)
+			Vec v1 = Vec(goal.x - ballX, goal.y - ballY, 0.f).Normalized();
 
-			float along = RandFloat(700.f, 2200.f);        // ponto P, à frente da bola
-			float perp  = RandFloat(400.f, 2000.f);        // distância à trajetória (>=100)
+			// 2) vetor de velocidade horizontal (X,Y) da bola
+			Vec v2 = Vec(velX, velY, 0.f);
+			Vec v2dir = v2.Normalized();
 
-			Vec P = Vec(ballX, ballY, 0.f) + d * along;
-			Vec a = P + n * perp;
+			// Referência ESTÁVEL de "dentro do campo": vetor da bola para o CENTRO.
+			// Não depende da direção da bola -> NÃO inverte se a bola for p/ a nossa baliza.
+			Vec toCenter = Vec(-ballX, -ballY, 0.f);
 
-			// Mantém dentro do campo (margem das paredes/baliza)
-			float carX = RS_CLAMP(a.x, -3800.f, 3800.f);
-			float carY = RS_CLAMP(a.y, -2500.f, 4400.f);
-			cs.pos = Vec(carX, carY, 17.f);
+			// 3) v2 rodado 90°, escolhido para o lado do CENTRO do campo (interior).
+			Vec v3 = Vec(-v2dir.y, v2dir.x, 0.f);          // perpendicular a v2
+			if (v3.Dot(toCenter) < 0.f) v3 = v3 * -1.f;    // garante que aponta para dentro
 
-			// Virado para o ponto P da trajetória, com desvio aleatório de ±45°
-			float baseYaw = atan2f(P.y - carY, P.x - carX);
-			float yaw = baseYaw + RandFloat(-(float)M_PI / 4.f, (float)M_PI / 4.f);
-			cs.rotMat = Angle(yaw, 0.f, 0.f).ToRotMat();
+			// 4) RETÂNGULO de zonas possíveis a partir da bola: deslocamento ao longo de
+			//    v2 (direção da bola) e de v3 (perpendicular p/ dentro). Min/max escalados
+			//    com a velocidade da bola; o do v3 é MENOR que o do v2.
+			float speedScale = RS_CLAMP(horizSpeed / maxSpeed, 0.f, 1.f);
+			float offV2 = RandFloat(1400.f, 2000.f);   // ao longo da direção da bola
+			float offV3 = RandFloat(1000.f, 1500.f);   // perpendicular p/ dentro
 
-			// Velocidade baixa na direção em que está virado (pronto, não comprometido)
-			float speed = RandFloat(0.f, 500.f);
-			cs.vel   = Vec(cosf(yaw) * speed, sinf(yaw) * speed, 0.f);
+			cs.pos = Vec(ballX, ballY, 17.f) + (v2dir * offV2 + v3 * offV3);
+
+			// 5) ORIENTAÇÃO = v1 (bola->baliza) rodado 90° PARA DENTRO do campo (mediante o lado)
+			Vec ori = Vec(-v1.y, v1.x, 0.f);
+			if (ori.Dot(toCenter) < 0.f) ori = ori * -1.f;  // aponta para dentro (lado do centro)
+			float yaw = atan2f(ori.y, ori.x);
+			cs.rotMat = Angle(-yaw, 0.f, 0.f).ToRotMat();
+
+			// Velocidade na direção em que está virado (já a correr para o lance)
+			float speed = RandFloat(700.f, 700.f);
+			cs.vel   = Vec(cosf(-yaw) * speed, sinf(-yaw) * speed, 0.f);
 			cs.boost = 100.f;
 		} else {
 			// DEFENSOR (ORANGE): em qualquer ponto à largura do campo, desde que a
