@@ -31,7 +31,7 @@ void RLGC::CrossingState::ResetArena(Arena* arena) {
 	//   asa esquerda (side=-1, vai da esquerda p/ direita): roda 0..-90°
 	// ARCO (vertical): velZ alto -> a bola sobe e cai = bola alta que exige aéreo.
 	// ---------------------------------------------------------------------
-	float horizSpeed = RandFloat(minSpeed, maxSpeed);
+	float horizSpeed = RandFloat(minSpeed, maxSpeed/1.5f); // velocidade horizontal do cruzamento (parametrizável via minSpeed/maxSpeed)
 
 	Vec goal = Vec(0.f, 5120.f, 0.f); // baliza ORANGE (alvo do BLUE)
 	float goalAng = atan2f(goal.y - ballY, goal.x - ballX); // ângulo do vetor bola->baliza (XY)
@@ -41,7 +41,7 @@ void RLGC::CrossingState::ResetArena(Arena* arena) {
 
 	float velX = cosf(velAng) * horizSpeed;
 	float velY = sinf(velAng) * horizSpeed;
-	float velZ = RandFloat(650.f, 1250.f);  // o ARCO (sobe primeiro)
+	float velZ = RandFloat(650.f, 1050.f);  // o ARCO (sobe primeiro)
 
 	{
 		BallState bs = {};
@@ -82,7 +82,7 @@ void RLGC::CrossingState::ResetArena(Arena* arena) {
 			//    v2 (direção da bola) e de v3 (perpendicular p/ dentro). Min/max escalados
 			//    com a velocidade da bola; o do v3 é MENOR que o do v2.
 			float speedScale = RS_CLAMP(horizSpeed / maxSpeed, 0.f, 1.f);
-			float offV2 = RandFloat(1400.f, 2000.f);   // ao longo da direção da bola
+			float offV2 = RandFloat(1700.f, 2300.f);   // ao longo da direção da bola
 			float offV3 = RandFloat(1000.f, 1500.f);   // perpendicular p/ dentro
 
 			cs.pos = Vec(ballX, ballY, 17.f) + (v2dir * offV2 + v3 * offV3);
@@ -107,7 +107,7 @@ void RLGC::CrossingState::ResetArena(Arena* arena) {
 			float yaw = atan2f(0.f - y, 0.f - x) + RandFloat(-0.15f, 0.15f);
 
 			cs.pos    = Vec(x, y, 17.f);
-			cs.rotMat = Angle(yaw, 0.f, 0.f).ToRotMat();
+			cs.rotMat = Angle(-yaw, 0.f, 0.f).ToRotMat();
 			cs.vel    = Vec(0.f, 0.f, 0.f);
 			cs.boost  = RandFloat(20.f, 50.f);
 		}

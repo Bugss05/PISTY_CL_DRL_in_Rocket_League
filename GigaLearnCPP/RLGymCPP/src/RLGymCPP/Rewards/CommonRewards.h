@@ -366,9 +366,12 @@ namespace RLGC {
 	class StrongTouchReward : public Reward {
 	public:
 		float minRewardedVel, maxRewardedVel;
-		StrongTouchReward(float minSpeedKPH = 20, float maxSpeedKPH = 130) {
+		float heightForDouble; // altura (uu) à qual o multiplicador de altura chega a 2
+		StrongTouchReward(float minSpeedKPH = 20, float maxSpeedKPH = 130,
+			float heightForDouble = CommonValues::CEILING_Z) {
 			minRewardedVel = RLGC::Math::KPHToVel(minSpeedKPH);
 			maxRewardedVel = RLGC::Math::KPHToVel(maxSpeedKPH);
+			this->heightForDouble = heightForDouble;
 		}
 
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
@@ -380,7 +383,10 @@ namespace RLGC {
 				if (hitForce < minRewardedVel)
 					return 0;
 
-				return RS_MIN(1, hitForce / maxRewardedVel);
+				float base = RS_MIN(1, hitForce / maxRewardedVel);
+				// Multiplicador de ALTURA em [1, 2]: 1 no chão, sobe até 2 em heightForDouble.
+				float heightMult = 1.0f + RS_CLAMP(state.ball.pos.z / heightForDouble, 0.0f, 1.0f);
+				return base * heightMult;
 			} else {
 				return 0;
 			}
@@ -728,38 +734,117 @@ namespace RLGC {
 	// 3) TOQUES AÉREOS CONSECUTIVOS: cada vez que toca na bola NO AR (acima de
 	// minBallHeight) SEM ter aterrado, a reward cresce (1×, 2×, 3×, ...). Reinicia ao
 	// aterrar. Incentiva controlar/juggle a bola no ar.
-	// Estado por jogador via vetor indexado por player.index (barato, sem hashing).
+	// Além disso ESCALA com o TEMPO que demorou a tocar na bola (intervalo desde o
+	// toque anterior, ou desde que saltou para o 1º toque). Fator [1, 2] -> só AUMENTA,
+	// nunca diminui: mais tempo até ao toque -> maior o fator (até maxGap segundos).
+	// Estado por jogador via vetores indexados por player.index (barato, sem hashing).
 	class ConsecutiveAirTouchReward : public Reward {
 	public:
 		float minBallHeight; // altura mínima da bola (uu) para o toque contar
-		int   maxCount;      // teto do multiplicador (evita explodir)
+		int   maxCount;      // teto do multiplicador de contagem (evita explodir)
+		float maxGap;        // tempo (s) até ao qual o fator de tempo chega a 2
 
-		ConsecutiveAirTouchReward(float minBallHeight = 400.f, int maxCount = 5)
-			: minBallHeight(minBallHeight), maxCount(maxCount) {}
+		ConsecutiveAirTouchReward(float minBallHeight = 400.f, int maxCount = 5, float maxGap = 1.0f)
+			: minBallHeight(minBallHeight), maxCount(maxCount), maxGap(maxGap) {}
 
-		std::vector<int> touchCount; // toques aéreos seguidos, por player.index
+		std::vector<int>   touchCount;     // toques aéreos seguidos, por player.index
+		std::vector<float> timeSinceTouch; // tempo (s) desde o último toque aéreo, por player.index
 
 		virtual void Reset(const GameState& initialState) override {
 			touchCount.clear();
+			timeSinceTouch.clear();
 		}
 
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
 			int idx = player.index;
-			if ((int)touchCount.size() <= idx) touchCount.resize(idx + 1, 0);
+			if ((int)touchCount.size() <= idx) {
+				touchCount.resize(idx + 1, 0);
+				timeSinceTouch.resize(idx + 1, 0.f);
+			}
 
-			// Aterrou -> reinicia a contagem.
+			// Acumula o tempo desde o último toque aéreo.
+			timeSinceTouch[idx] += state.deltaTime;
+
+			// Aterrou -> reinicia a contagem e o cronómetro.
 			if (player.isOnGround) {
 				touchCount[idx] = 0;
+				timeSinceTouch[idx] = 0.f;
 				return 0.0f;
 			}
 
-			// Toque no ar com altura mínima -> incrementa e premeia (multiplicador crescente).
+			// Toque no ar com altura mínima -> incrementa e premeia.
 			if (player.ballTouchedStep && state.ball.pos.z >= minBallHeight) {
 				if (touchCount[idx] < maxCount) touchCount[idx]++;
-				return (float)touchCount[idx]; // 1, 2, 3, ... (peso na main escala)
+
+				// Fator do TEMPO que demorou a tocar: [1, 2], só AUMENTA (nunca < 1).
+				float timeFrac = RS_CLAMP(timeSinceTouch[idx] / maxGap, 0.0f, 1.0f);
+				float scale = 1.0f + timeFrac;
+
+				float reward = (float)touchCount[idx] * scale; // contagem × fator de tempo
+
+				// Reinicia o cronómetro até ao próximo toque.
+				timeSinceTouch[idx] = 0.f;
+				return reward;
 			}
 
 			return 0.0f;
+		}
+	};
+
+	// Penaliza a bola a BATER NA PAREDE ADVERSÁRIA (linha de golo do alvo) ABAIXO da
+	// BARRA mas FORA da baliza — o atacante chegou à linha de golo e falhou ao lado.
+	//   - Atribuída SÓ ao ÚLTIMO a tocar na bola (o atacante que rematou).
+	//   - NÃO conta se estiver dentro das bounds da baliza (seria golo).
+	//   - NÃO conta por CIMA da barra (só abaixo).
+	//   - minHeight: altura mínima de tolerância — hits muito rasteiros não contam.
+	//   - Devolve 1.0 no instante do hit -> dá-lhe um PESO NEGATIVO na main.
+	// Usa PreStep para saber quem foi o último a tocar (estado por arena).
+	class WallMissPenalty : public Reward {
+	public:
+		float minHeight; // altura mínima (uu) da bola para o hit contar (tolerância)
+
+		WallMissPenalty(float minHeight = 100.f) : minHeight(minHeight) {}
+
+		int  lastToucherId = -1;            // carId do último a tocar na bola (por arena)
+		Team lastToucherTeam = Team::BLUE;
+
+		virtual void Reset(const GameState& initialState) override {
+			lastToucherId = -1;
+		}
+
+		// Atualiza quem foi o último a tocar (1x por step, antes das rewards).
+		virtual void PreStep(const GameState& state) override {
+			for (const auto& p : state.players)
+				if (p.ballTouchedStep) { lastToucherId = (int)p.carId; lastToucherTeam = p.team; }
+		}
+
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			if (state.goalScored) return 0.0f;                 // foi golo -> não penaliza
+			if (!state.prev) return 0.0f;
+			if (lastToucherId < 0) return 0.0f;
+			// Só o ÚLTIMO a tocar (o atacante que rematou) recebe a penalização.
+			if ((int)player.carId != lastToucherId) return 0.0f;
+
+			// Parede ADVERSÁRIA = baliza que o último toque ATACA (BLUE -> +Y, ORANGE -> -Y).
+			bool targetOrange = lastToucherTeam == Team::BLUE;
+			float wallY = targetOrange ? CommonValues::BACK_WALL_Y : -CommonValues::BACK_WALL_Y;
+			float yWall = wallY - (targetOrange ? CommonValues::BALL_RADIUS : -CommonValues::BALL_RADIUS);
+
+			// A bola toca a parede de fundo do alvo NESTE step (cruza yWall a aproximar-se).
+			float prevY = state.prev->ball.pos.y;
+			float curY  = state.ball.pos.y;
+			bool reachedWall = targetOrange ? (prevY < yWall && curY >= yWall)
+			                                : (prevY > yWall && curY <= yWall);
+			if (!reachedWall) return 0.0f;
+
+			float bz = state.ball.pos.z;
+			float bx = fabsf(state.ball.pos.x);
+
+			bool belowBar    = bz <= CommonValues::GOAL_HEIGHT;             // abaixo da barra
+			bool aboveMin    = bz >= minHeight;                            // tolerância de altura
+			bool outsideGoal = bx > CommonValues::GOAL_WIDTH_FROM_CENTER;  // FORA da baliza (não é golo)
+
+			return (belowBar && aboveMin && outsideGoal) ? 1.0f : 0.0f;
 		}
 	};
 

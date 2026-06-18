@@ -37,29 +37,41 @@ void RLGC::WallDragState::ResetArena(Arena* arena) {
 	for (Car* car : arena->_cars) {
 		CarState cs = {};
 
-		// Atrás da bola, perto da parede, no chão — como se estivesse a segui-la
-		float carX = ballX - side * RandFloat(200.f, 600.f);  // atrás da bola em X, mesmo lado
-		float carY = RandFloat(ballY - 600.f, ballY - 300.f);
-		if (carY < -2560.f) carY = -2560.f;
+		if (car->team == Team::BLUE) {
+			// ATACANTE: atrás da bola, perto da parede, no chão — como se a seguisse.
+			float carX = ballX - side * RandFloat(200.f, 600.f);  // atrás da bola em X, mesmo lado
+			float carY = RandFloat(ballY - 600.f, ballY - 300.f);
+			if (carY < -2560.f) carY = -2560.f;
 
-		cs.pos = Vec(carX, carY, 17.f);
+			cs.pos = Vec(carX, carY, 17.f);
 
-		// Apontar para a bola
-		float dx = ballX - carX;
-		float dy = ballY - carY;
-		float yaw = atan2f(dy, dx);
-		cs.rotMat = Angle(yaw, 0.f, 0.f).ToRotMat();
+			// Apontar para a bola
+			float dx = ballX - carX;
+			float dy = ballY - carY;
+			float yaw = atan2f(dy, dx);
+			cs.rotMat = Angle(yaw, 0.f, 0.f).ToRotMat();
 
-		// Velocidade baixa — a seguir a bola
-		float carSpeed = RandFloat(0.f, 600.f);
-		cs.vel = Vec(
-			cosf(yaw) * carSpeed + RandFloat(-100.f, 100.f),
-			sinf(yaw) * carSpeed + RandFloat(-100.f, 100.f),
-			0.f
-		);
+			// Velocidade baixa — a seguir a bola
+			float carSpeed = RandFloat(0.f, 600.f);
+			cs.vel = Vec(
+				cosf(yaw) * carSpeed + RandFloat(-100.f, 100.f),
+				sinf(yaw) * carSpeed + RandFloat(-100.f, 100.f),
+				0.f
+			);
+			cs.boost = 100.f;
+		} else {
+			// DEFENSOR (ORANGE): guarda-redes junto à baliza +Y (a bola avança para +Y).
+			float x   = RandFloat(-3100.f, 3100.f);   // qualquer ponto à largura
+			float y   = RandFloat(4520.f, 5050.f);    // dentro de 300 uu da parede da baliza
+			float yaw = atan2f(0.f - y, 0.f - x) + RandFloat(-0.15f, 0.15f); // virado p/ o campo
+
+			cs.pos    = Vec(x, y, 17.f);
+			cs.rotMat = Angle(yaw, 0.f, 0.f).ToRotMat();
+			cs.vel    = Vec(0.f, 0.f, 0.f);
+			cs.boost  = RandFloat(20.f, 50.f);
+		}
+
 		cs.angVel = Vec(0.f, 0.f, 0.f);
-		cs.boost  = 100.f;
-
 		car->SetState(cs);
 	}
 }

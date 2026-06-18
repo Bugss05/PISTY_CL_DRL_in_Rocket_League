@@ -119,7 +119,7 @@ namespace RLGC {
                 float defVisualError = RandFloat(-15.f * kDegToRad, 15.f * kDegToRad);
                 float defenderYaw = defBaseYaw + defVisualError;
                 
-                cs.rotMat = Angle(defenderYaw, 0.f, 0.f).ToRotMat();
+                cs.rotMat = Angle(-defenderYaw, 0.f, 0.f).ToRotMat();
             }
 
             car->SetState(cs);

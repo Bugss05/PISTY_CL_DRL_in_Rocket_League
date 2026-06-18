@@ -1,0 +1,7 @@
+# Dependências Python do GigaLearnCPP (interpretador embebido via pybind11).
+#
+# Só o metric_receiver.py (envio de métricas) tem dependência externa: wandb.
+# O render_receiver.py usa apenas a stdlib (socket/struct para o rlviser).
+# wandb já traz numpy e o resto das suas dependências automaticamente.
+
+wandb>=0.16
