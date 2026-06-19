@@ -10,23 +10,23 @@ void ShootingState::ResetArena(Arena* arena) {
     arena->ResetToRandomKickoff();
 
     // ---------------------------------------------------------
-    // 0. ESPELHAMENTO (Escolher qual a equipa ataca)
+    // 0. MIRRORING (Choose which team attacks)
     // ---------------------------------------------------------
     float goalY = RandFloat(0.f, 1.f) > 0.5f ? 5120.f : -5120.f;
-    
-    // Direção apontada para o centro do campo a partir da baliza alvo
-    float dirMid = goalY > 0.f ? -1.f : 1.f; 
+
+    // Direction pointing to the center of the field from the target goal
+    float dirMid = goalY > 0.f ? -1.f : 1.f;
 
     // ---------------------------------------------------------
-    // 1. ÁREA DE SPAWN DA BOLA
+    // 1. BALL SPAWN AREA
     // ---------------------------------------------------------
     float r_ball = RandFloat(2000.f, 4000.f);
     float angle_ball_deg = RandFloat(-70.f, 70.f);
-    float angle_ball_rad = angle_ball_deg * (M_PI / 180.f); // Passar para radianos
+    float angle_ball_rad = angle_ball_deg * (M_PI / 180.f); // Convert to radians
 
     float ballX = r_ball * sinf(angle_ball_rad);
     float ballY = goalY + dirMid * r_ball * cosf(angle_ball_rad);
-    float ballZ = CommonValues::BALL_RADIUS; // Manter a bola no chão
+    float ballZ = CommonValues::BALL_RADIUS; // Keep the ball on the ground
 
     {
         BallState bs = {};
@@ -36,19 +36,19 @@ void ShootingState::ResetArena(Arena* arena) {
         arena->ball->SetState(bs);
     }
 
-    // A equipa atacante é a que está a atacar a baliza mais próxima da bola.
+    // The attacking team is the one attacking the goal closest to the ball.
     float distToBlueGoal = fabsf(ballY + 5120.f);
     float distToOrangeGoal = fabsf(ballY - 5120.f);
     bool blueAttacks = distToOrangeGoal <= distToBlueGoal;
 
     // ---------------------------------------------------------
-    // 2. ÁREA DE SPAWN DO ATACANTE
+    // 2. ATTACKER SPAWN AREA
     // ---------------------------------------------------------
     float d_att = RandFloat(500.f, 1000.f);
     float angle_att_deg = RandFloat(-30.f, 30.f);
     float angle_att_rad = angle_att_deg * (M_PI / 180.f);
 
-    // Vetor direção [Baliza -> Bola]
+    // Direction vector [Goal -> Ball]
     float gbX = ballX - 0.f;
     float gbY = ballY - goalY;
     float magGB = sqrtf(gbX*gbX + gbY*gbY);
@@ -65,7 +65,7 @@ void ShootingState::ResetArena(Arena* arena) {
     float attYaw = atan2f(ballY - attY, ballX - attX);
 
     // ---------------------------------------------------------
-    // 3. ÁREA DE SPAWN DO DEFENSOR
+    // 3. DEFENDER SPAWN AREA
     // ---------------------------------------------------------
     float lateralDist = RandFloat(500.f, 700.f);
     float toBallX = ballX - attX;
@@ -102,7 +102,7 @@ void ShootingState::ResetArena(Arena* arena) {
     float defYaw = atan2f(ballY - defY, ballX - defX);
 
     // ---------------------------------------------------------
-    // 4. APLICAR AOS CARROS (Separar as equipas)
+    // 4. APPLY TO THE CARS (Separate the teams)
     // ---------------------------------------------------------
     for (Car* car : arena->_cars) {
         CarState cs = {};

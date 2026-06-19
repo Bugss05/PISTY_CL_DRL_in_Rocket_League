@@ -7,24 +7,24 @@ using RocketSim::Math::RandFloat;
 void RLGC::WallDragState::ResetArena(Arena* arena) {
 	arena->ResetToRandomKickoff();
 
-	// Lado aleatório: +1 = parede direita, -1 = parede esquerda
+	// Random side: +1 = right wall, -1 = left wall
 	float side = (RandFloat(0.f, 1.f) > 0.5f) ? 1.f : -1.f;
 
-	// Bola no chão, colada à parede lateral
-	// Y: um pouco antes do meio campo até quase à baliza adversária
+	// Ball on the ground, glued to the side wall
+	// Y: a bit before midfield up to almost the opponent's goal
 	float ballX = side * RandFloat(3200.f, 3200.f);
 	float ballY = RandFloat(-300.f, 3000.f);
-	float ballZ = 93.f;  // raio da bola — a tocar o chão
+	float ballZ = 93.f;  // ball radius — touching the ground
 
-	// Ângulo θ ∈ [2π/5, π/2] a partir do eixo +Y (frente), no plano XY:
-	// [-π/2, -2π/5] do utilizador → magnitude [2π/5, π/2] em direção à parede
-	// sin(θ) → componente X para a parede (dominante ~95–100%)
-	// cos(θ) → componente Y para a frente (pequena ~0–31%)
+	// Angle θ ∈ [2π/5, π/2] from the +Y axis (forward), in the XY plane:
+	// [-π/2, -2π/5] from the user → magnitude [2π/5, π/2] toward the wall
+	// sin(θ) → X component toward the wall (dominant ~95–100%)
+	// cos(θ) → Y component forward (small ~0–31%)
 	float theta = RandFloat(2.f * float(M_PI) / 5.f, float(M_PI) / 2.f);
 	float speed = RandFloat(2100.f, 2100.f);
 
-	float velX = side * sinf(theta) * speed;  // para a parede (dominante)
-	float velY = cosf(theta) * speed;          // avanço para a frente (pequeno)
+	float velX = side * sinf(theta) * speed;  // toward the wall (dominant)
+	float velY = cosf(theta) * speed;          // forward advance (small)
 
 	{
 		BallState bs = {};
@@ -38,20 +38,20 @@ void RLGC::WallDragState::ResetArena(Arena* arena) {
 		CarState cs = {};
 
 		if (car->team == Team::BLUE) {
-			// ATACANTE: atrás da bola, perto da parede, no chão — como se a seguisse.
-			float carX = ballX - side * RandFloat(200.f, 600.f);  // atrás da bola em X, mesmo lado
+			// ATTACKER: behind the ball, near the wall, on the ground — as if following it.
+			float carX = ballX - side * RandFloat(200.f, 600.f);  // behind the ball in X, same side
 			float carY = RandFloat(ballY - 600.f, ballY - 300.f);
 			if (carY < -2560.f) carY = -2560.f;
 
 			cs.pos = Vec(carX, carY, 17.f);
 
-			// Apontar para a bola
+			// Point at the ball
 			float dx = ballX - carX;
 			float dy = ballY - carY;
 			float yaw = atan2f(dy, dx);
 			cs.rotMat = Angle(yaw, 0.f, 0.f).ToRotMat();
 
-			// Velocidade baixa — a seguir a bola
+			// Low speed — following the ball
 			float carSpeed = RandFloat(0.f, 600.f);
 			cs.vel = Vec(
 				cosf(yaw) * carSpeed + RandFloat(-100.f, 100.f),
@@ -60,10 +60,10 @@ void RLGC::WallDragState::ResetArena(Arena* arena) {
 			);
 			cs.boost = 100.f;
 		} else {
-			// DEFENSOR (ORANGE): guarda-redes junto à baliza +Y (a bola avança para +Y).
-			float x   = RandFloat(-3100.f, 3100.f);   // qualquer ponto à largura
-			float y   = RandFloat(4520.f, 5050.f);    // dentro de 300 uu da parede da baliza
-			float yaw = atan2f(0.f - y, 0.f - x) + RandFloat(-0.15f, 0.15f); // virado p/ o campo
+			// DEFENDER (ORANGE): goalkeeper next to the +Y goal (the ball advances toward +Y).
+			float x   = RandFloat(-3100.f, 3100.f);   // anywhere across the width
+			float y   = RandFloat(4520.f, 5050.f);    // within 300 uu of the goal wall
+			float yaw = atan2f(0.f - y, 0.f - x) + RandFloat(-0.15f, 0.15f); // facing the field
 
 			cs.pos    = Vec(x, y, 17.f);
 			cs.rotMat = Angle(yaw, 0.f, 0.f).ToRotMat();

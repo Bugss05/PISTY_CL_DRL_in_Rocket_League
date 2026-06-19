@@ -19,89 +19,101 @@ Just replace this with your original examplemain.cpp file in your GigalearnCPP-L
 #include <RLGymCPP/ObsBuilders/DefaultObsPadded.h>
 #include <RLGymCPP/StateSetters/KickoffState.h>
 #include <RLGymCPP/StateSetters/RandomState.h>
-#include <RLGymCPP/StateSetters/WallDragState.h>
 #include <RLGymCPP/StateSetters/PassingState.h>
 #include <RLGymCPP/StateSetters/CrossingState.h>
 #include <RLGymCPP/StateSetters/FallingBallState.h>
 #include <RLGymCPP/StateSetters/ShootingState.h>
+#include <RLGymCPP/StateSetters/WallDragState.h>
+#include <RLGymCPP/StateSetters/CombinedState.h>
 #include <RLGymCPP/ActionParsers/DefaultAction.h>
 #include <RLGymCPP/ActionParsers/NoMoveAction.h>
-#include "SchedulableState.h"
 
 using namespace GGL;
 using namespace RLGC;
 
-// Mete a TRUE à mão para os carros NÃO se mexerem (usa NoMoveAction em vez de
-// DefaultAction). Ex.: observar o cenário em render com os bots parados.
+// Set to TRUE by hand to make the cars NOT move (uses NoMoveAction instead of
+// DefaultAction). E.g.: watch the scenario in render with the bots standing still.
 bool g_freezeBots = false;
 
-// Mete a TRUE para o BACKUP NOTURNO: a cada g_nightBackupInterval iterações copia a
-// pasta inteira de checkpoints para run_noite/<iteracao>/.
+// Set to TRUE for the NIGHTLY BACKUP: every g_nightBackupInterval iterations it copies
+// the entire checkpoints folder to run_noite/<iteration>/.
 bool g_nightBackup = true;
-int  g_nightBackupInterval = 150;
+int  g_nightBackupInterval = 300;
 
 EnvCreateResult EnvCreateFunc(int index) {
-    // Rewards — pesos iniciais 0; o scheduler aplica a Fase 0 na primeira iteração.
-    // A ORDEM e os NOMES têm de coincidir com PhaseConfig.h.
+    // ====================================================================
+    // REWARD WEIGHTS - EDIT BY HAND. Each line format: { reward, weight }.
     //
-    // ZeroSumReward(child, teamSpirit, opponentScale=1):
-    //   player_reward = own*(1-ts) + avgTeam*ts - opponentScale*avgOpponent
-    //   - teamSpirit = 0 em 1v1 (1 jogador por equipa -> não tem efeito; guia: começar baixo)
-    //   - opponentScale = 1.0 -> zero-sum total
-    //   - opponentScale < 1.0 -> viés de agressividade (sofrer custa menos do que marcar)
+    // Two WRAPPERS are used several times below. A wrapper wraps another
+    // reward (the "child") and transforms the value it returns:
     //
-    // Filosofia (rewards.md): só zero-sum se for VANTAJOSO o adversário IMPEDIR.
-    //   ZERO-SUM  -> golos, bola->golo, powershots/toques fortes, velocidade.
-    //   NÃO zero-sum -> mecânica/movimento/afinação (ar, encarar bola, aerial,
-    //                   parede, whiff): zero-sum aqui só adicionaria ruído.
-    // ===== PESOS DAS REWARDS — EDITA AQUI À MÃO (sem scheduler) =====
-    // Formato: { reward, peso }.
-    // ZeroSumReward(child, teamSpirit, opponentScale):
-    //   teamSpirit=0 em 1v1; opponentScale=1.0 -> zero-sum total;
-    //   opponentScale<1.0 -> viés de agressividade (sofrer custa menos que marcar).
+    //   ZeroSumReward(child, teamSpirit, opponentScale)
+    //     Makes the reward ZERO-SUM: what one gains, the opponent "loses".
+    //     player_reward = own*(1-teamSpirit) + avgTeam*teamSpirit - opponentScale*avgOpponent
+    //       - teamSpirit   = fraction shared with teammates. In 1v1 it has no
+    //                        effect (1 player per team) -> we use 0.0.
+    //       - opponentScale= weight of the punishment for what the opponent gains.
+    //                        1.0 -> full zero-sum; <1.0 -> aggressiveness bias
+    //                        (conceding costs less than scoring).
+    //     Philosophy (rewards.md): zero-sum is only worth it when it is ADVANTAGEOUS
+    //     for the opponent to PREVENT it (goals, ball->goal, powershots, bumps/demos, shot/save).
+    //     Personal mechanics/tuning (air, facing the ball, aerial, wall, whiff) does
+    //     NOT get zero-sum - there it would only add noise.
+    //
+    //   GoalDirectionReward(child, onlyAttackHalf, checkHeight)
+    //     DIRECTIONAL filter: only lets the child's reward through when the touch sends
+    //     the ball TOWARD the opponent's GOAL, scaling by the alignment to the goal.
+    //       - onlyAttackHalf = true  -> in own half it passes the full reward;
+    //                                    only filters in the attacking half.
+    //                          false -> requires direction to the goal across the WHOLE field.
+    //       - checkHeight    = false -> does NOT penalize going over the crossbar (posts only);
+    //                          true  -> also requires passing below the crossbar.
+    // ====================================================================
     std::vector<WeightedReward> rewards = {
-        // --- ZERO-SUM (o adversário quer impedir) ---
-        { new ZeroSumReward(new GoalReward(-1, 2.0f, 2.5f), 0.0f, 0.8f),        70.0f }, // GoalReward(concedeScale, speedScale, heightScale): golo escalado pela velocidade e ALTURA de entrada
-        { new ZeroSumReward(new VelocityBallToGoalReward(false), 0.0f, 0.8f),   5.0f }, // bola->golo = progresso ofensivo
-        { new GoalDirectionReward(new TouchAccelReward(), true, false),         1.5f }, // GoalDirectionReward(child, onlyAttackHalf, checkHeight): metade de ataque, NÃO penaliza por cima da barra
-        { new GoalDirectionReward(new StrongTouchReward(30,100), true, false),  1.0f }, // idem: powershot p/ a baliza (sem penalizar por cima)
-        { new VelocityPlayerToBallReward(),                                     0.25f },
-        { new TouchBallReward(),                                                0.00f },
-        { new FaceBallReward(),                                                 0.15f },
-        { new AirReward(350.f, 0.3f, 3.5f, 0.3f),                               0.7f }, // AirReward(heightThresh, lowScale, noTouchTime, noTouchScale): ar por altura; decai após 3s sem tocar
-        { new WallLaunchReward(),                                               0.2f },
-        { new SpeedReward(),                                                    0.08f }, // ter velocidade
-        // --- Mecânica aérea (novas) ---
+        // --- ZERO-SUM (the opponent wants to prevent it) ---
 
-        { new AirTouchReward(0.3f, 450.f),                                      9.0f }, // AirTouchReward(minAirTime, minBallHeight): toque aéreo com tempo+altura mínimos
-        { new DoubleJumpBoostReward(25.f, 425.f),                              0.40f }, // DoubleJumpBoostReward(belowTolerance, minBallHeight): double jump + boost p/ aéreo
-        { new GoalDirectionReward(new FlickReward(1.0f, 5.0f, 0.05f, 0.7f), true, false), 10.0f }, // flick PARA A FRENTE; na metade de ataque só conta se for p/ a baliza
-        { new ForwardFlipReward(0.7f),                                            0.7f }, // ForwardFlipReward(forwardThresh): flip PARA A FRENTE (não lateral/trás)
-        { new AirProximityReward(400.f, 2500.f, 300.f),                          1.0f }, // AirProximityReward(minBallHeight, maxDist, wallMargin): perto da bola no ar × altura × velocidade
-        { new ConsecutiveAirTouchReward(300.f, 10, 2.0f),                         8.0f }, // ConsecutiveAirTouchReward(minBallHeight, maxCount, maxGap): contagem × tempo desde o toque anterior
+        { new ZeroSumReward(new GoalReward(-1, 2.0f, 2.5f), 0.0f, 0.8f),                  70.0f },  // GoalReward(concedeScale, speedScale, heightScale): goal; concedeScale=mult for the one who CONCEDES (-1=symmetric), speedScale=bonus for entry speed, heightScale=bonus for entry height
+        { new ZeroSumReward(new VelocityBallToGoalReward(false), 0.0f, 0.8f),             5.0f },  // VelocityBallToGoalReward(ownGoal): ball->goal = offensive progress; ownGoal=false -> measured toward the OPPONENT's goal
+        { new GoalDirectionReward(new TouchAccelReward(), true, false),                   1.5f },  // TouchAccelReward() (no args): rewards ACCELERATING the ball on touch. Here filtered toward the goal (onlyAttackHalf=true, checkHeight=false)
+        { new GoalDirectionReward(new StrongTouchReward(30,100), true, false),            1.0f },  // StrongTouchReward(minSpeedKPH, maxSpeedKPH): powershot; only counts above minSpeedKPH, saturates at maxSpeedKPH (+height mult). Filtered toward the goal
+        { new VelocityPlayerToBallReward(),                                               0.25f },  // VelocityPlayerToBallReward() (no args): moving toward the ball
+        { new TouchBallReward(),                                                          0.00f },  // TouchBallReward() (no args): 1 on the step it touches the ball, otherwise 0
+        { new FaceBallReward(),                                                           0.15f },  // FaceBallReward(retreatScale=1.0): point the nose at the ball; when moving away it penalizes × retreatScale
+        { new AirReward(350.f, 0.3f, 3.5f, 0.3f),                                         0.7f },  // AirReward(heightThresh, lowScale, noTouchTime, noTouchScale): in the air; lowScale below heightThresh, 1.0 above; after noTouchTime s without touching it is × noTouchScale
+        { new WallLaunchReward(),                                                         0.2f },  // WallLaunchReward() (no args): jump off the side wall (1.0) and touch the ball right after in the air (2.0)
+        { new SpeedReward(),                                                              0.08f },  // SpeedReward() (no args): having speed (|vel| / car max speed)
+        // --- Aerial mechanics (new) ---
 
-        // --- Eventos do jogo (preenchidos pelo GameEventTracker) ---
-        { new ZeroSumReward(new ShotReward(),0.0f,0.2f),                        6.5f }, // remate à baliza
-        { new ZeroSumReward(new SaveReward(),0.0f,0.4f),                        7.0f }, // defesa
+        { new AirTouchReward(0.3f, 450.f),                                                9.0f },  // AirTouchReward(minAirTime, minBallHeight): GATE - touch the ball while airborne for >= minAirTime s and with the ball above minBallHeight (uu)
+        { new DoubleJumpBoostReward(25.f, 425.f),                                         0.40f },  // DoubleJumpBoostReward(belowTolerance, minBallHeight): double jump + boost for aerial; ball up to belowTolerance below the car and above minBallHeight (uu)
+        { new GoalDirectionReward(new FlickReward(1.0f, 5.0f, 0.05f, 0.7f), true, false), 10.0f },  // FlickReward(velScale, heightScale, jumpReward, forwardThresh): flick with a FORWARD flip (flipRelTorque.y>forwardThresh); scales with velScale*vel + heightScale*height; jumpReward at the moment of the jump. Filtered toward the goal
+        { new ForwardFlipReward(0.7f),                                                    0.7f },  // ForwardFlipReward(forwardThresh): FORWARD flip (not sideways/backwards); only counts if flipRelTorque.y>forwardThresh
+        { new AirProximityReward(400.f, 2500.f, 300.f),                                   1.0f },  // AirProximityReward(minBallHeight, maxDist, wallMargin): airborne and near the ball; ball above minBallHeight, proximity up to maxDist, ignored if within wallMargin of a wall (uu)
+        { new ConsecutiveAirTouchReward(300.f, 10, 2.0f),                                 8.0f },  // ConsecutiveAirTouchReward(minBallHeight, maxCount, maxGap): consecutive aerial touches above minBallHeight; count up to maxCount × time factor since the previous touch (up to maxGap s)
 
-        { new WhiffReward(),                                                    -0.25f }, // falhar a bola (erro próprio)
-        { new WallMissPenalty(300.f),                                           -4.0f }, // WallMissPenalty(minHeight): bola na parede adversária abaixo da barra, fora da baliza (último a tocar); peso NEGATIVO
-        //{ new BallTouchGroundPenalty(1000.f, 500.f, 2000.f),                    -1.0f }, // BallTouchGroundPenalty(horizThresh, zThresh, zMax): bola a cair (sitter); peso NEGATIVO
-        { new ZeroSumReward(new BumpReward(),0.0f,0.5f),                        4.0f }, // bump no adversário
-        { new ZeroSumReward(new DemoReward(),0.0f,0.5f),                        3.0f }, // demo no adversário
-        { new LandAllFoursReward(),                                             3.5f }, // aterrar nas 4 rodas
-        
-        { new WavedashReward(),                                                 2.5f }, // wavedash (dodge+land rápido)
+        // --- Game events (filled in by the GameEventTracker) ---
+        { new ZeroSumReward(new ShotReward(),0.0f,0.2f),                                  6.5f },  // ShotReward() (no args): shot on the opponent's goal
+        { new ZeroSumReward(new SaveReward(),0.0f,0.4f),                                  7.0f },  // SaveReward() (no args): save of a shot
+
+        { new WhiffReward(),                                                              -0.25f },  // WhiffReward(whiffDist=250): whiffing the ball - got within < whiffDist (uu) and moved away without touching. NEGATIVE WEIGHT (penalty)
+        { new WallMissPenalty(300.f),                                                     -4.0f },  // WallMissPenalty(minHeight): ball hits the opponent's wall below the crossbar and outside the goal (last toucher); minHeight = tolerance. NEGATIVE WEIGHT
+        //{ new BallTouchGroundPenalty(1000.f, 500.f, 2000.f),                            -1.0f },  // BallTouchGroundPenalty(horizThresh, zThresh, zMax): "sitter" ball falling to the ground; horizThresh=horizontal speed above which it does NOT punish, zThresh/zMax=falling-speed window. NEGATIVE WEIGHT
+        { new ZeroSumReward(new BumpReward(),0.0f,0.5f),                                  4.0f }, // BumpReward() (no args): bump the opponent
+        { new ZeroSumReward(new DemoReward(),0.0f,0.5f),                                  3.0f }, // DemoReward() (no args): demolish (demo) the opponent
+        { new LandAllFoursReward(),                                                       3.5f }, // LandAllFoursReward() (no args): land on all 4 wheels (car upright), scales with alignment to vertical
 
 
-    }; 
+        { new WavedashReward(),                                                           2.5f }, // WavedashReward() (no args): wavedash - land right after a flip (quick dodge+land)
+
+
+    };
 
     std::vector<TerminalCondition*> terminals = {
         new GoalScoreCondition(),
         new TimeoutCondition(30.f),
     };
 
-    // 1v1: um carro BLUE e um carro ORANGE
+    // 1v1: one BLUE car and one ORANGE car
     auto arena = Arena::Create(GameMode::SOCCAR);
 
     MutatorConfig mutator = MutatorConfig(GameMode::SOCCAR);
@@ -112,28 +124,31 @@ EnvCreateResult EnvCreateFunc(int index) {
     arena->AddCar(Team::BLUE,   CAR_CONFIG_PLANK);
     arena->AddCar(Team::ORANGE, CAR_CONFIG_PLANK);
 
-    // State setters — pesos iniciais definidos aqui; o scheduler sobrepõe por fase.
-    // Nomes têm de coincidir EXACTAMENTE com PhaseConfig.h (stateWeights).
+    // ====================================================================
+    // STATE SETTERS - initial scenario of each episode. Format: { setter, weight }.
     //
-    // Cada cenário (Pass/FallingBall/Cross) tem SEMPRE o ORANGE em posição
-    // defensiva (DefenderState). WallDrag é mecânica avançada -> só fase final.
-    auto stateSetter = new SchedulableState({
-        // Base do treino 1v1
-        { "Kickoff",  new KickoffState(),                   0.4f },
-        { "Random",   new RandomState(true, false, true),   1.0f },
+    // CombinedState picks ONE setter per arena reset, at random, weighted by the
+    // weights (weight 0 = never picked). There is NO scheduler/phases: each
+    // setter's weights and parameters are fixed (the defaults here).
+    // In the gameplay scenarios (Passing/Crossing/...) ORANGE ALWAYS spawns in a
+    // defensive position, embedded in the setter itself.
+    // ====================================================================
+    auto stateSetter = new CombinedState({
+        // 1v1 training base
+        { new KickoffState(),                   0.4f },  // KickoffState() (no args): standard random kickoff (boost forced to 100)
+        { new RandomState(true, false, true),   1.0f },  // RandomState(randBallSpeed, randCarSpeed, carsOnGround): here ball with random speed, cars stationary and on the ground
 
-        // Cenários novos (atacante + defensor já incluídos no próprio state setter)
-        { "Passing",  new PassingState(),                   1.0f }, // passe
-        { "Crossing", new CrossingState(),                  3.0f }, // CrossingState(minHeight, maxHeight, minSpeed, maxSpeed)
-        { "Shooting", new ShootingState(),                  0.2f }, // remate
-        { "fallingBall", new FallingBallState(),            1.0f }, // bola a cair do céu (sem rebote)
-        // Mecânica avançada de parede (wall dribble/launch)
-        { "WallDrag", new WallDragState(),                  0.0f },
-    }, /*stochastic*/ true);
+        // Additional scenarios
+        { new PassingState(),                   1.0f },  // PassingState() (no args): pass - attacker + defender embedded
+        { new CrossingState(),                  3.0f },  // CrossingState(minHeight, maxHeight, minSpeed, maxSpeed): arcing aerial cross; ball's initial Z and horizontal speed (defaults 300/700, 1000/1700)
+        { new ShootingState(),                  0.2f },  // ShootingState() (no args): shot-on-goal scenario
+        { new FallingBallState(),               1.0f },  // FallingBallState() (no args): ball falling from the sky (aerial) vs goalkeeper
+        { new WallDragState(),                  0.0f },  // WallDragState() (no args): advanced wall mechanic - DISABLED (weight 0; raise the weight to enable)
+    });
 
     auto obsBuilder   = new DefaultObsPadded(1);
     ActionParser* actionParser = g_freezeBots
-        ? (ActionParser*)new NoMoveAction()   // bots parados (flag manual)
+        ? (ActionParser*)new NoMoveAction()   // bots standing still (manual flag)
         : (ActionParser*)new DefaultAction();
 
     EnvCreateResult result = {};
@@ -149,8 +164,8 @@ EnvCreateResult EnvCreateFunc(int index) {
 
 void StepCallback(Learner* learner, const std::vector<GameState>& states, Report& report) {
 
-    // BACKUP NOTURNO (flag g_nightBackup): a cada g_nightBackupInterval iterações copia
-    // a pasta inteira de checkpoints para run_noite/<iteracao>/ (recuperar bots se piorarem).
+    // NIGHTLY BACKUP (flag g_nightBackup): every g_nightBackupInterval iterations it copies
+    // the entire checkpoints folder to run_noite/<iteration>/ (to recover bots if they get worse).
     if (g_nightBackup && !learner->config.renderMode) {
         static uint64_t lastBackupIter = 0;
         uint64_t it = learner->totalIterations;
@@ -169,14 +184,14 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
         }
     }
 
-    // RENDER: imprime em live as ações de cada carro e SALIENTA os flips (dodges).
+    // RENDER: prints each car's actions live and HIGHLIGHTS the flips (dodges).
     if (learner->config.renderMode && !states.empty()) {
-        const GameState& gs = states[0]; // arena 0 (render = 1 jogo)
+        const GameState& gs = states[0]; // arena 0 (render = 1 game)
         for (auto& player : gs.players) {
             const Action& a = player.prevAction;
             const char* teamStr = player.team == Team::BLUE ? "BLUE" : "ORANGE";
 
-            // Início de um FLIP (dodge) neste step -> alerta bem visível.
+            // Start of a FLIP (dodge) this step -> very visible alert.
             bool flipStarted = player.prev && player.isFlipping && !player.prev->isFlipping;
             if (flipStarted) {
                 const char* dir = player.flipRelTorque.y > 0.5f ? "FRENTE"
@@ -216,23 +231,22 @@ int main(int argc, char* argv[]) {
     RocketSim::Init(CONFIG_COLLISION_MESHES);
 
     LearnerConfig cfg = {};
-    // AMD (9070 XT) NÃO tem CUDA. Este framework só suporta CUDA ou CPU.
-    // AUTO -> usa GPU se torch::cuda::is_available() (CUDA/ROCm-Linux), senão CPU.
-    // No Windows com AMD, isto corre em CPU.
-    cfg.deviceType  = LearnerDeviceType::GPU_CUDA; // ou LearnerDeviceType::CPU para forçar CPU (AMD/Windows)
+    cfg.deviceType  = LearnerDeviceType::GPU_CUDA; // or LearnerDeviceType::CPU to force CPU (AMD/Windows), or auto for automatic
     cfg.tickSkip    = 8;
     cfg.actionDelay = cfg.tickSkip - 1;
-    cfg.numGames    = 768;
+    cfg.numGames    = 768;  // WARNING: more parallel games = more VRAM and more CPU. Lower it if the machine can't handle it.
 
     cfg.ppo.tsPerItr       = 262144;
-    cfg.ppo.batchSize      = 262144;  // guia: = tsPerItr
-    cfg.ppo.miniBatchSize  = 131072;   // guia: 25k-50k (porção pequena do batch, poupa VRAM/RAM)
-    cfg.ppo.epochs         = 2;       // guia: 2-3 (era 1, abaixo do recomendado)
+    cfg.ppo.batchSize      = 262144;  // WARNING: bigger batch = more VRAM and more CPU per update. Lower it if you run out of memory.
+    cfg.ppo.miniBatchSize  = 131072;
+    cfg.ppo.epochs         = 2;
     cfg.ppo.entropyScale   = 0.035f;
     cfg.ppo.gaeGamma       = 0.996f;
     cfg.ppo.policyLR       = 1.0e-4f;
     cfg.ppo.criticLR       = 1.0e-4f;
-    cfg.ppo.sharedHead.layerSizes = { 1024, 1024, 1024 }; // guia: 512-1024 (mais profundo = mais lento, mas melhor)
+    // ATTENTION: if you are going to CONTINUE OUR bot (load our checkpoint), you MUST
+    // keep EXACTLY these network sizes - changing them invalidates the saved weights.
+    cfg.ppo.sharedHead.layerSizes = { 1024, 1024, 1024 };
     cfg.ppo.policy.layerSizes     = { 256, 256, 256 };
     cfg.ppo.critic.layerSizes     = { 256, 256, 256 };
 
@@ -244,18 +258,18 @@ int main(int argc, char* argv[]) {
     cfg.ppo.policy.addLayerNorm     = true;
     cfg.ppo.critic.addLayerNorm     = true;
 
-    // Half-precision só compensa em GPU CUDA; em CPU (AMD/Windows) é mais lento.
-    // Volta a true se treinares numa GPU CUDA.
+    // Half-precision is only worth it on a CUDA GPU; on CPU (AMD/Windows) it is slower.
+    // Set back to true if you train on a CUDA GPU.
     cfg.ppo.useHalfPrecision = false;
 
-    // ELO + self-play contra versoes anteriores
+    // ELO + self-play against previous versions
     cfg.skillTracker.enabled        = true;
     cfg.skillTracker.numArenas      = 8;
     cfg.skillTracker.simTime        = 45;
     cfg.skillTracker.updateInterval = 16;
     cfg.skillTracker.ratingInc      = 5;
     cfg.skillTracker.initialRating  = 0;
-    cfg.trainAgainstOldVersions     = true; // treina contra snapshots antigos (league), não só mirror
+    cfg.trainAgainstOldVersions     = true; // trains against old snapshots (league), not just mirror
 
     bool renderMode = false;
     for (int i = 1; i < argc; ++i) {

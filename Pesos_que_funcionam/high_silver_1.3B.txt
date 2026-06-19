@@ -27,9 +27,3 @@
         { new LandAllFoursReward(),                                             0.8f }, // aterrar nas 4 rodas
         
         { new WavedashReward(),                                                 1.0f }, // wavedash (dodge+land rápido)
-    };
-
-    std::vector<TerminalCondition*> terminals = {
-        new GoalScoreCondition(),
-        new TimeoutCondition(60.f),
-    };

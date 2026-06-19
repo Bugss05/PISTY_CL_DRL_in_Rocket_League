@@ -44,8 +44,8 @@ namespace RLGC {
         const float targetY = attackBlue ? CommonValues::BACK_WALL_Y : -CommonValues::BACK_WALL_Y;
         const Vec targetGoal = Vec(0.f, targetY, 0.f);
 
-        // --- 1. SPAWN DA BOLA (CORREDOR CENTRAL - MARGEM DE 1500) ---
-        // Alterado para 1500.f de cada lado para prender a bola no centro do campo
+        // --- 1. BALL SPAWN (CENTRAL CORRIDOR - 1500 MARGIN) ---
+        // Changed to 1500.f on each side to keep the ball in the center of the field
         float ballX = RandFloat(-CommonValues::SIDE_WALL_X + 1500.f, CommonValues::SIDE_WALL_X - 1500.f);
         float ballY = 0.f;
 
@@ -61,7 +61,7 @@ namespace RLGC {
         BallState bs = {};
         bs.pos = ballPos;
 
-        // --- PERTURBAÇÃO CIRÚRGICA NA VELOCIDADE DA BOLA ---
+        // --- SURGICAL PERTURBATION ON THE BALL VELOCITY ---
         float fallSpeedZ = RandFloat(-2000.f, -1000.f);
         float perturbAngle = RandFloat(0.f, 3.f) * kDegToRad; 
         float perturbTheta = RandFloat(-kPi, kPi); 
@@ -74,7 +74,7 @@ namespace RLGC {
         bs.angVel = Vec(0.f, 0.f, 0.f);
         arena->ball->SetState(bs);
 
-        // --- 2. POSIÇÃO DO ATACANTE ---
+        // --- 2. ATTACKER POSITION ---
         Vec ballToGoal = FlatNormalized(targetGoal - ballPos, Vec(0.f, attackBlue ? 1.f : -1.f, 0.f));
         Vec behindBall = ballToGoal * -1.f;
 
@@ -91,7 +91,7 @@ namespace RLGC {
         float attVisualError = RandFloat(-15.f * kDegToRad, 15.f * kDegToRad);
         float attackerYaw = attBaseYaw + attVisualError;
 
-        // --- 3. APLICAR AOS CARROS ---
+        // --- 3. APPLY TO THE CARS ---
         for (Car* car : arena->_cars) {
             CarState cs = {};
             

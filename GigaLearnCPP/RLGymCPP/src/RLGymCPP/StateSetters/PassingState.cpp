@@ -47,13 +47,13 @@ namespace RLGC {
         const Vec goalPos = attackBlue ? CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
         const Vec towardField = GoalDirection(attackBlue);
 
-        // --- 1. SPAWN DA BOLA ---
+        // --- 1. BALL SPAWN ---
         const float ballRadius = RandFloat(2500.f, 4500.f);
         const float ballAngle = RandFloat(-60.f * kDegToRad, 60.f * kDegToRad);
         Vec ballPos = goalPos + Rotate2D(towardField, ballAngle) * ballRadius;
         ballPos = ClampToField(ballPos, CommonValues::BALL_RADIUS, CommonValues::BALL_RADIUS);
 
-        // --- 2. SPAWN DO ATACANTE ---
+        // --- 2. ATTACKER SPAWN ---
         Vec attackerPos;
         bool validSpawn = false;
         
@@ -77,25 +77,25 @@ namespace RLGC {
             attackerPos = ClampToField(attackerPos, 180.f, 180.f);
         }
 
-        // --- 3. PASSE (VELOCIDADE E ALTURA DA BOLA) ---
+        // --- 3. PASS (BALL SPEED AND HEIGHT) ---
         Vec ballToAttacker = FlatNormalized(attackerPos - ballPos, towardField);
         float errorAngle = RandFloat(-5.f * kDegToRad, 5.f * kDegToRad);
         Vec passDir = Rotate2D(ballToAttacker, errorAngle);
 
         BallState bs = {};
-        
-        // NOVO: Define a altura inicial da bola (no chão ou ligeiramente no ar até 200)
+
+        // NEW: Sets the ball's initial height (on the ground or slightly in the air up to 200)
         float spawnHeight = RandFloat(CommonValues::BALL_RADIUS, 200.f);
         bs.pos = Vec(ballPos.x, ballPos.y, spawnHeight);
-        
-        // NOVO: Mantém a velocidade horizontal, mas adiciona um "pop" no eixo Z para a bola saltar ou planar um pouco
-        bs.vel = passDir * RandFloat(1000.f, 2500.f); 
-        bs.vel.z = RandFloat(0.f, 350.f); // Ligeiro passe por alto / ressalto
-        
+
+        // NEW: Keeps the horizontal speed, but adds a "pop" on the Z axis so the ball bounces or floats a bit
+        bs.vel = passDir * RandFloat(1000.f, 2500.f);
+        bs.vel.z = RandFloat(0.f, 350.f); // Slight chip pass / bounce
+
         bs.angVel = Vec(0.f, 0.f, 0.f);
         arena->ball->SetState(bs);
 
-        // --- 4. SPAWN DOS CARROS ---
+        // --- 4. CARS SPAWN ---
         for (Car* car : arena->_cars) {
             CarState cs = {};
             Vec carPos;

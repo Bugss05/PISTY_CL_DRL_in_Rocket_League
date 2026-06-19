@@ -2,27 +2,27 @@
 #include "StateSetter.h"
 
 namespace RLGC {
-	// "Crossing": bola ALTA em ARCO vinda de uma asa em direção à zona frontal da
-	// baliza adversária, forçando o atacante a preparar-se para um AÉRIO.
+	// "Crossing": HIGH ARCING ball coming from a wing toward the front zone of the
+	// opponent's goal, forcing the attacker to prepare for an AERIAL.
 	//
-	// Diferente do CrossState (cruzamento rasteiro/meia-altura colado à parede):
-	// aqui a bola sobe (velZ alto) e arqueia para dentro.
+	// Different from CrossState (low/mid-height cross glued to the wall):
+	// here the ball rises (high velZ) and arcs inward.
 	//
-	// PAPÉIS FIXOS, embutidos no próprio estado (não precisa de DefenderState):
-	//   BLUE   = ATACANTE -> PERPENDICULAR à trajetória XY da bola (>=100 uu dela),
-	//            na metade do campo mais LONGE da baliza, virado para o ponto P da
-	//            trajetória (±45°), boost cheio.
-	//   ORANGE = DEFENSOR -> em qualquer ponto a <=300 uu da sua parede da baliza (+Y),
-	//            virado para o centro do campo.
+	// FIXED ROLES, embedded in the state itself (no DefenderState needed):
+	//   BLUE   = ATTACKER -> PERPENDICULAR to the ball's XY trajectory (>=100 uu from it),
+	//            in the half of the field FARTHER from the goal, facing point P of the
+	//            trajectory (±45°), full boost.
+	//   ORANGE = DEFENDER -> anywhere within <=300 uu of its own goal wall (+Y),
+	//            facing the center of the field.
 	//
-	// Convenção: BLUE ataca a baliza ORANGE (+Y, em Y=+5120).
+	// Convention: BLUE attacks the ORANGE goal (+Y, at Y=+5120).
 	//
-	// Parâmetros agendáveis (SetParam): "minHeight"/"maxHeight" (Z inicial da bola),
-	// "minSpeed"/"maxSpeed" (velocidade horizontal do cruzamento).
+	// Schedulable parameters (SetParam): "minHeight"/"maxHeight" (ball's initial Z),
+	// "minSpeed"/"maxSpeed" (horizontal speed of the cross).
 	class CrossingState : public StateSetter {
 	public:
-		float minHeight, maxHeight;   // Z inicial da bola (uu)
-		float minSpeed, maxSpeed;     // velocidade horizontal do cruzamento (uu/s)
+		float minHeight, maxHeight;   // ball's initial Z (uu)
+		float minSpeed, maxSpeed;     // horizontal speed of the cross (uu/s)
 
 		CrossingState(float minHeight = 300.f, float maxHeight = 700.f,
 		              float minSpeed = 1000.f, float maxSpeed = 1700.f)

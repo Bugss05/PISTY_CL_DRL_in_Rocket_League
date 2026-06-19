@@ -1,7 +1,6 @@
 #!/bin/bash
 
-# Lê um valor do src/config.h — ex: cfg CONFIG_PROJECT_ROOT
-cfg() { grep -E "^#define $1 " "$(dirname "$0")/src/config.h" | sed 's/.*"\(.*\)".*/\1/'; }
+cfg() { grep -E "^#define $1 " "$(dirname "$0")/../../src/config.h" | sed 's/.*"\(.*\)".*/\1/'; }
 
 PROJECT_ROOT=$(cfg CONFIG_PROJECT_ROOT)
 LIBTORCH_PATH=$(cfg CONFIG_LIBTORCH_PATH)
@@ -14,7 +13,7 @@ cd "$PROJECT_ROOT/build"
 make -j$(nproc) || { echo "Erro ao compilar! A cancelar arranque."; exit 1; }
 cd "$PROJECT_ROOT"
 
-# Para compilar de raiz com cmake (só precisas quando adicionas ficheiros .cpp novos):
+# Para compilar de raiz com cmake (so precisas quando adicionas ficheiros .cpp novos):
 #   cd "$PROJECT_ROOT/build"
 #   cmake .. -DCMAKE_PREFIX_PATH="$LIBTORCH_PATH" -DCMAKE_BUILD_TYPE=Release
 #   make -j$(nproc)
@@ -24,21 +23,21 @@ LOG_FILE="crash_report.log"
 TEMP_LIMIT=90
 COOL_DOWN=600
 
-# --- VARIÁVEIS DE AMBIENTE (Essenciais para a tua GPU) ---
+# --- VARIÁVEIS DE AMBIENTE ---
 export HSA_OVERRIDE_GFX_VERSION=12.0.1
 # AMD_SERIALIZE_KERNEL=3  # DEBUG ONLY — serializa kernels GPU, mata throughput
-export ROCR_VISIBLE_DEVICES=0          # garante que só usa a GPU primária
-export HIP_FORCE_DEV_KERNARG=1         # reduz overhead de cópia de argumentos de kernel
-export MALLOC_ARENA_MAX=4              # limita fragmentação de memória do allocator C
+export ROCR_VISIBLE_DEVICES=0
+export HIP_FORCE_DEV_KERNARG=1
+export MALLOC_ARENA_MAX=4
 export PYTHONHOME="$PYTHON_HOME"
 export PYTHONPATH="$PYTHON_PACKAGES:$BIN_PATH/python_scripts"
 export LD_LIBRARY_PATH="$ROCM_LIB:$LD_LIBRARY_PATH"
 
 while true; do
-    echo "[$(date)] A iniciar GigaLearnBot (render)..." | tee -a "$LOG_FILE"
+    echo "[$(date)] A iniciar GigaLearnBot..." | tee -a "$LOG_FILE"
 
     cd "$BIN_PATH"
-    ./GigaLearnBot --render
+    ./GigaLearnBot
 
     EXIT_CODE=$?
 

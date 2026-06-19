@@ -4,11 +4,11 @@
 namespace RLGC {
     class ShootingState : public StateSetter {
     public:
-        // Construtor vazio para o compilador não reclamar
+        // Empty constructor so the compiler doesn't complain
         ShootingState() {}
 
         virtual void SetParam(const std::string& key, float value) override {
-            // Vazio por agora
+            // Empty for now
         }
 
         virtual void ResetArena(Arena* arena) override;

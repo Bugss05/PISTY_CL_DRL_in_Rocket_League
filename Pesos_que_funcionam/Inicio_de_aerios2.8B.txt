@@ -1,0 +1,31 @@
+        { new ZeroSumReward(new GoalReward(-1, 2.0f, 2.5f), 0.0f, 0.8f),        70.0f }, // GoalReward(concedeScale, speedScale, heightScale): golo escalado pela velocidade e ALTURA de entrada
+        { new ZeroSumReward(new VelocityBallToGoalReward(false), 0.0f, 0.8f),   5.0f }, // bola->golo = progresso ofensivo
+        { new GoalDirectionReward(new TouchAccelReward(), true, false),         1.5f }, // GoalDirectionReward(child, onlyAttackHalf, checkHeight): metade de ataque, NÃO penaliza por cima da barra
+        { new GoalDirectionReward(new StrongTouchReward(30,100), true, false),  1.0f }, // idem: powershot p/ a baliza (sem penalizar por cima)
+        { new VelocityPlayerToBallReward(),                                     0.25f },
+        { new TouchBallReward(),                                                0.00f },
+        { new FaceBallReward(),                                                 0.15f },
+        { new AirReward(350.f, 0.3f, 3.5f, 0.3f),                               0.7f }, // AirReward(heightThresh, lowScale, noTouchTime, noTouchScale): ar por altura; decai após 3s sem tocar
+        { new WallLaunchReward(),                                               0.2f },
+        { new SpeedReward(),                                                    0.08f }, // ter velocidade
+        // --- Mecânica aérea (novas) ---
+
+        { new AirTouchReward(0.3f, 450.f),                                      9.0f }, // AirTouchReward(minAirTime, minBallHeight): toque aéreo com tempo+altura mínimos
+        { new DoubleJumpBoostReward(25.f, 425.f),                              0.40f }, // DoubleJumpBoostReward(belowTolerance, minBallHeight): double jump + boost p/ aéreo
+        { new GoalDirectionReward(new FlickReward(1.0f, 5.0f, 0.05f, 0.7f), true, false), 10.0f }, // flick PARA A FRENTE; na metade de ataque só conta se for p/ a baliza
+        { new ForwardFlipReward(0.7f),                                            0.7f }, // ForwardFlipReward(forwardThresh): flip PARA A FRENTE (não lateral/trás)
+        { new AirProximityReward(400.f, 2500.f, 300.f),                          1.0f }, // AirProximityReward(minBallHeight, maxDist, wallMargin): perto da bola no ar × altura × velocidade
+        { new ConsecutiveAirTouchReward(300.f, 10, 2.0f),                         8.0f }, // ConsecutiveAirTouchReward(minBallHeight, maxCount, maxGap): contagem × tempo desde o toque anterior
+
+        // --- Eventos do jogo (preenchidos pelo GameEventTracker) ---
+        { new ZeroSumReward(new ShotReward(),0.0f,0.2f),                        6.5f }, // remate à baliza
+        { new ZeroSumReward(new SaveReward(),0.0f,0.4f),                        7.0f }, // defesa
+
+        { new WhiffReward(),                                                    -0.25f }, // falhar a bola (erro próprio)
+        { new WallMissPenalty(300.f),                                           -4.0f }, // WallMissPenalty(minHeight): bola na parede adversária abaixo da barra, fora da baliza (último a tocar); peso NEGATIVO
+        //{ new BallTouchGroundPenalty(1000.f, 500.f, 2000.f),                    -1.0f }, // BallTouchGroundPenalty(horizThresh, zThresh, zMax): bola a cair (sitter); peso NEGATIVO
+        { new ZeroSumReward(new BumpReward(),0.0f,0.5f),                        4.0f }, // bump no adversário
+        { new ZeroSumReward(new DemoReward(),0.0f,0.5f),                        3.0f }, // demo no adversário
+        { new LandAllFoursReward(),                                             3.5f }, // aterrar nas 4 rodas
+        
+        { new WavedashReward(),                                                 2.5f }, // wavedash (dodge+land rápido)
