@@ -59,8 +59,7 @@ libtorch
 *.so
 /checkpoints
 /wandb
-/collision_meshes
-/gigalearn_env  
+/gigalearn_env
 *.zip
 GigaLearnCPP/libtorch/
 *.so
