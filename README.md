@@ -1,3 +1,7 @@
+# Bot Videos
+
+To see our bot in action, please check out our companion repository with videos of the bot playing **[here](https://github.com/miguel-c05/pisty-videos)**.
+
 # Installation & Setup Instructions
 
 This guide walks you through setting up the project from scratch: cloning the repository, installing all required tools and dependencies, and getting everything ready to build and run. Follow the steps in order.
